@@ -16,10 +16,6 @@ service cloud.firestore {
         && get(currentUserDoc()).data.role == 'admin';
     }
 
-    function isDefaultRoom(roomId) {
-      return roomId in ['crew', 'design', 'support'];
-    }
-
     function roomDoc(roomId) {
       return /databases/$(database)/documents/rooms/$(roomId);
     }
@@ -78,7 +74,7 @@ service cloud.firestore {
 
     match /rooms/{roomId} {
       allow read: if signedIn()
-        && (isAdmin() || isDefaultRoom(roomId) || isRoomParticipant(roomId));
+        && (isAdmin() || isRoomParticipant(roomId));
 
       allow create: if isAdmin()
         && request.resource.data.keys().hasOnly([
@@ -106,10 +102,10 @@ service cloud.firestore {
 
       match /messages/{messageId} {
         allow read: if signedIn()
-          && (isAdmin() || isDefaultRoom(roomId) || isRoomParticipant(roomId));
+          && (isAdmin() || isRoomParticipant(roomId));
 
         allow create: if signedIn()
-          && (isAdmin() || isDefaultRoom(roomId) || isRoomParticipant(roomId))
+          && (isAdmin() || isRoomParticipant(roomId))
           && request.resource.data.roomId == roomId
           && request.resource.data.authorId == request.auth.uid
           && request.resource.data.text is string

@@ -48,7 +48,7 @@ import { auth, db, isFirebaseConfigured } from './lib/firebase'
 import './App.css'
 
 type AuthMode = 'login' | 'signup' | 'reset'
-type ConnectionState = 'demo' | 'connecting' | 'live' | 'error'
+type ConnectionState = 'connecting' | 'live' | 'error'
 type UserRole = 'user' | 'admin'
 type UserStatus = 'active' | 'blocked'
 type AdminPanel = 'users' | 'direct' | 'group'
@@ -60,7 +60,6 @@ type AuthSession = {
   nickname: string
   role: UserRole
   status: UserStatus
-  isDemo: boolean
 }
 
 type ManagedUser = {
@@ -116,133 +115,6 @@ type StoredUserProfile = {
   status?: unknown
 }
 
-const initialRooms: ChatRoom[] = [
-  {
-    id: 'crew',
-    name: '프로젝트 크루',
-    subtitle: 'Firebase 구조 확인했어요',
-    members: '8명',
-    unread: 3,
-    accent: '#06c755',
-    status: '작업 중',
-    type: 'group',
-  },
-  {
-    id: 'design',
-    name: '디자인 라운지',
-    subtitle: '버블 간격은 지금 느낌 좋아요',
-    members: '4명',
-    unread: 0,
-    accent: '#4f7cff',
-    status: '검토',
-    type: 'group',
-  },
-  {
-    id: 'support',
-    name: '고객 응대',
-    subtitle: '문의 자동 분류도 붙일 수 있어요',
-    members: '12명',
-    unread: 6,
-    accent: '#ffb224',
-    status: '대기',
-    type: 'group',
-  },
-]
-
-const demoUsers: ManagedUser[] = [
-  {
-    id: 'demo-admin',
-    email: 'admin@greentalk.local',
-    nickname: '운영자',
-    role: 'admin',
-    status: 'active',
-  },
-  {
-    id: 'minseo',
-    email: 'minseo@example.com',
-    nickname: '민서',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'jiwoo',
-    email: 'jiwoo@example.com',
-    nickname: '지우',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'harin',
-    email: 'harin@example.com',
-    nickname: '하린',
-    role: 'user',
-    status: 'blocked',
-  },
-]
-
-const demoMessages: Record<string, ChatMessage[]> = {
-  crew: [
-    {
-      id: 'crew-1',
-      roomId: 'crew',
-      author: '민서',
-      authorId: 'minseo',
-      text: '일반 유저는 기존 채팅방에서는 메시지를 보낼 수 있어요.',
-      time: '18:02',
-      isMine: false,
-    },
-    {
-      id: 'crew-2',
-      roomId: 'crew',
-      author: '나',
-      authorId: 'local-me',
-      text: '새 채팅 시작은 관리자 버튼으로만 열리게 만들겠습니다.',
-      time: '18:04',
-      isMine: true,
-    },
-    {
-      id: 'crew-3',
-      roomId: 'crew',
-      author: '지우',
-      authorId: 'jiwoo',
-      text: '관리자는 유저 관리, 1:1 대화 시작, 단톡 생성을 할 수 있으면 좋겠네요.',
-      time: '18:07',
-      isMine: false,
-    },
-  ],
-  design: [
-    {
-      id: 'design-1',
-      roomId: 'design',
-      author: '하린',
-      authorId: 'harin',
-      text: '초록색은 포인트로만 쓰고 배경은 차분하게 두면 오래 봐도 편해요.',
-      time: '17:42',
-      isMine: false,
-    },
-    {
-      id: 'design-2',
-      roomId: 'design',
-      author: '나',
-      authorId: 'local-me',
-      text: '권한별로 버튼이 다르게 보이도록 맞춰볼게요.',
-      time: '17:45',
-      isMine: true,
-    },
-  ],
-  support: [
-    {
-      id: 'support-1',
-      roomId: 'support',
-      author: '상담봇',
-      authorId: 'bot',
-      text: '새 문의 6건이 들어왔습니다. 긴급 키워드 1건이 포함되어 있어요.',
-      time: '16:58',
-      isMine: false,
-    },
-  ],
-}
-
 const timeFormatter = new Intl.DateTimeFormat('ko-KR', {
   hour: '2-digit',
   hour12: false,
@@ -261,11 +133,6 @@ const statusCopy: Record<UserStatus, string> = {
   blocked: '차단',
 }
 
-const makeLocalId = () =>
-  typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
-
 const formatTime = (date = new Date()) => timeFormatter.format(date)
 
 const getFallbackNickname = (email: string) => {
@@ -278,16 +145,9 @@ const normalizeRole = (role: unknown): UserRole => (role === 'admin' ? 'admin' :
 const normalizeStatus = (status: unknown): UserStatus =>
   status === 'blocked' ? 'blocked' : 'active'
 
-const getDemoRole = (email: string): UserRole =>
-  email.toLowerCase().includes('admin') ? 'admin' : 'user'
-
-const getDemoUserId = (email: string) =>
-  getDemoRole(email) === 'admin' ? 'demo-admin' : 'local-me'
-
 const getRoomAccent = (seed: number) => roomAccents[seed % roomAccents.length]
 
 const connectionCopy: Record<ConnectionState, string> = {
-  demo: '로컬 데모',
   connecting: 'Firebase 연결 중',
   live: 'Firebase 실시간',
   error: 'Firebase 확인 필요',
@@ -344,7 +204,6 @@ const buildSessionFromUser = async (user: User): Promise<AuthSession> => {
     nickname,
     role,
     status,
-    isDemo: false,
   }
 }
 
@@ -360,31 +219,25 @@ function App() {
   const [authError, setAuthError] = useState('')
   const [authMessage, setAuthMessage] = useState('')
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false)
-  const [chatRooms, setChatRooms] = useState(initialRooms)
-  const [activeRoomId, setActiveRoomId] = useState(initialRooms[0].id)
+  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([])
+  const [activeRoomId, setActiveRoomId] = useState('')
   const [draft, setDraft] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
-  const [messagesByRoom, setMessagesByRoom] = useState(demoMessages)
   const [remoteMessages, setRemoteMessages] = useState<ChatMessage[]>([])
-  const [connectionState, setConnectionState] = useState<ConnectionState>(
-    isFirebaseConfigured ? 'connecting' : 'demo',
-  )
-  const [currentUserId, setCurrentUserId] = useState('local-me')
-  const [managedUsers, setManagedUsers] = useState(demoUsers)
+  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([])
   const [adminPanel, setAdminPanel] = useState<AdminPanel>('users')
   const [adminNotice, setAdminNotice] = useState('')
   const [directTargetId, setDirectTargetId] = useState('')
   const [groupName, setGroupName] = useState('')
-  const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([
-    'minseo',
-    'jiwoo',
-  ])
+  const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([])
 
   const isAdmin = authSession?.role === 'admin'
-  const canSendMessage = authSession?.status === 'active'
+  const canSendMessage =
+    authSession?.status === 'active' && Boolean(activeRoomId) && connectionState !== 'error'
 
   const activeRoom = useMemo(
-    () => chatRooms.find((room) => room.id === activeRoomId) ?? chatRooms[0] ?? initialRooms[0],
+    () => chatRooms.find((room) => room.id === activeRoomId),
     [activeRoomId, chatRooms],
   )
 
@@ -407,19 +260,10 @@ function App() {
     )
   }, [chatRooms, searchTerm])
 
-  const visibleMessages = useMemo(() => {
-    if (isFirebaseConfigured && authSession && connectionState !== 'error') {
-      return remoteMessages
-    }
-
-    return messagesByRoom[activeRoomId] ?? []
-  }, [
-    activeRoomId,
-    authSession,
-    connectionState,
-    messagesByRoom,
-    remoteMessages,
-  ])
+  const visibleMessages = useMemo(
+    () => (activeRoom && authSession ? remoteMessages : []),
+    [activeRoom, authSession, remoteMessages],
+  )
 
   const unreadTotal = useMemo(
     () => chatRooms.reduce((total, room) => total + room.unread, 0),
@@ -428,6 +272,8 @@ function App() {
 
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) {
+      setAuthReady(true)
+      setConnectionState('error')
       return
     }
 
@@ -436,7 +282,10 @@ function App() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
         setAuthSession(null)
-        setCurrentUserId('local-me')
+        setChatRooms([])
+        setRemoteMessages([])
+        setManagedUsers([])
+        setActiveRoomId('')
         setAuthReady(true)
         return
       }
@@ -449,7 +298,6 @@ function App() {
         }
 
         setAuthSession(session)
-        setCurrentUserId(session.uid)
         setAuthReady(true)
       } catch {
         if (!cancelled) {
@@ -459,9 +307,7 @@ function App() {
             nickname: user.displayName ?? '',
             role: 'user',
             status: 'active',
-            isDemo: false,
           })
-          setCurrentUserId(user.uid)
           setAuthReady(true)
         }
       }
@@ -475,6 +321,8 @@ function App() {
 
   useEffect(() => {
     if (!authSession || !isFirebaseConfigured || !db) {
+      setChatRooms([])
+      setActiveRoomId('')
       return
     }
 
@@ -515,16 +363,20 @@ function App() {
           }
         })
 
-        const mergedRooms = [
-          ...remoteRooms,
-          ...initialRooms.filter(
-            (initialRoom) => !remoteRooms.some((remoteRoom) => remoteRoom.id === initialRoom.id),
-          ),
-        ]
+        setChatRooms(remoteRooms)
+        setActiveRoomId((currentRoomId) => {
+          if (remoteRooms.length === 0) {
+            return ''
+          }
 
-        setChatRooms(mergedRooms)
+          return remoteRooms.some((room) => room.id === currentRoomId)
+            ? currentRoomId
+            : remoteRooms[0].id
+        })
+        setConnectionState('live')
       },
       () => {
+        setConnectionState('error')
         setAdminNotice('채팅방 목록을 불러오지 못했습니다.')
       },
     )
@@ -534,6 +386,7 @@ function App() {
 
   useEffect(() => {
     if (!authSession || authSession.role !== 'admin' || !isFirebaseConfigured || !db) {
+      setManagedUsers([])
       return
     }
 
@@ -570,7 +423,8 @@ function App() {
   }, [authSession])
 
   useEffect(() => {
-    if (!authSession || !isFirebaseConfigured || !db) {
+    if (!authSession || !isFirebaseConfigured || !db || !activeRoomId) {
+      setRemoteMessages([])
       return
     }
 
@@ -614,21 +468,6 @@ function App() {
 
     return unsubscribe
   }, [activeRoomId, authSession])
-
-  const completeDemoAuth = (email: string, nickname = getFallbackNickname(email)) => {
-    const role = getDemoRole(email)
-
-    setAuthSession({
-      uid: getDemoUserId(email),
-      email,
-      nickname: role === 'admin' ? '운영자' : nickname,
-      role,
-      status: 'active',
-      isDemo: true,
-    })
-    setCurrentUserId(getDemoUserId(email))
-    setConnectionState('demo')
-  }
 
   const switchAuthMode = (nextMode: AuthMode) => {
     setAuthMode(nextMode)
@@ -699,24 +538,18 @@ function App() {
       return
     }
 
+    if (!isFirebaseConfigured || !auth || !db) {
+      setAuthError('Firebase 설정이 없어 로그인할 수 없습니다. .env의 VITE_FIREBASE_* 값을 확인해주세요.')
+      setConnectionState('error')
+      return
+    }
+
     setIsAuthSubmitting(true)
 
     try {
       if (authMode === 'reset') {
-        if (isFirebaseConfigured && auth) {
-          await sendPasswordResetEmail(auth, email)
-        }
-
-        setAuthMessage(
-          isFirebaseConfigured
-            ? '비밀번호 재설정 메일을 보냈습니다.'
-            : '데모 모드에서는 재설정 메일 발송 없이 흐름만 확인합니다.',
-        )
-        return
-      }
-
-      if (!isFirebaseConfigured || !auth) {
-        completeDemoAuth(email, authMode === 'signup' ? nickname : undefined)
+        await sendPasswordResetEmail(auth, email)
+        setAuthMessage('비밀번호 재설정 메일을 보냈습니다.')
         return
       }
 
@@ -731,9 +564,7 @@ function App() {
           nickname,
           role: 'user',
           status: 'active',
-          isDemo: false,
         })
-        setCurrentUserId(user.uid)
         setConnectionState('connecting')
         return
       }
@@ -742,7 +573,6 @@ function App() {
       const session = await buildSessionFromUser(user)
 
       setAuthSession(session)
-      setCurrentUserId(session.uid)
       setConnectionState('connecting')
     } catch (error) {
       setAuthError(getAuthErrorMessage(error))
@@ -771,8 +601,8 @@ function App() {
     setIsAuthSubmitting(true)
 
     try {
-      if (authSession.isDemo || !isFirebaseConfigured || !auth?.currentUser) {
-        setAuthSession({ ...authSession, nickname })
+      if (!isFirebaseConfigured || !db || !auth?.currentUser) {
+        setAuthError('Firebase 연결을 확인해주세요.')
         return
       }
 
@@ -801,8 +631,10 @@ function App() {
     }
 
     setAuthSession(null)
-    setCurrentUserId('local-me')
-    setConnectionState('demo')
+    setChatRooms([])
+    setManagedUsers([])
+    setActiveRoomId('')
+    setConnectionState('error')
   }
 
   const openAdminPanel = (panel: AdminPanel) => {
@@ -817,18 +649,8 @@ function App() {
 
   const handleSelectRoom = (roomId: string) => {
     setActiveRoomId(roomId)
-
-    if (isFirebaseConfigured) {
-      setConnectionState('connecting')
-      setRemoteMessages([])
-    }
-  }
-
-  const appendLocalMessage = (message: ChatMessage) => {
-    setMessagesByRoom((currentMessages) => ({
-      ...currentMessages,
-      [activeRoomId]: [...(currentMessages[activeRoomId] ?? []), message],
-    }))
+    setConnectionState('connecting')
+    setRemoteMessages([])
   }
 
   const handleCreateDirectChat = async (event: FormEvent<HTMLFormElement>) => {
@@ -860,42 +682,29 @@ function App() {
       return
     }
 
-    let roomId = makeLocalId()
     const participantIds = [authSession.uid, targetUser.id]
-    const nextRoom: ChatRoom = {
-      id: roomId,
-      name: targetUser.nickname,
-      subtitle: `${authSession.nickname}님이 시작한 1:1 대화`,
-      members: '2명',
-      unread: 0,
-      accent: '#06c755',
-      status: '1:1',
-      type: 'direct',
-      participantIds,
-    }
+    const subtitle = `${authSession.nickname}님이 시작한 1:1 대화`
 
     try {
-      if (isFirebaseConfigured && db) {
-        const roomDoc = await addDoc(collection(db, 'rooms'), {
-          name: nextRoom.name,
-          subtitle: nextRoom.subtitle,
-          status: nextRoom.status,
-          type: 'direct',
-          participantIds,
-          createdBy: authSession.uid,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        })
-        roomId = roomDoc.id
+      if (!isFirebaseConfigured || !db) {
+        setConnectionState('error')
+        setAdminNotice('Firebase 연결을 확인해주세요.')
+        return
       }
 
-      const createdRoom = { ...nextRoom, id: roomId }
-      setChatRooms((currentRooms) => [createdRoom, ...currentRooms])
-      setMessagesByRoom((currentMessages) => ({
-        ...currentMessages,
-        [roomId]: currentMessages[roomId] ?? [],
-      }))
-      setActiveRoomId(roomId)
+      const roomDoc = await addDoc(collection(db, 'rooms'), {
+        name: targetUser.nickname,
+        subtitle,
+        status: '1:1',
+        type: 'direct',
+        participantIds,
+        createdBy: authSession.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+
+      setActiveRoomId(roomDoc.id)
+      setConnectionState('connecting')
       setAdminNotice(`${targetUser.nickname}님과의 대화를 시작했습니다.`)
     } catch {
       setAdminNotice('대화방을 만들지 못했습니다. 권한과 규칙을 확인해주세요.')
@@ -930,43 +739,30 @@ function App() {
       return
     }
 
-    let roomId = makeLocalId()
     const participantIds = [authSession.uid, ...selectedGroupMemberIds]
-    const nextRoom: ChatRoom = {
-      id: roomId,
-      name: roomName,
-      subtitle: `${authSession.nickname}님이 만든 단톡방`,
-      members: `${participantIds.length}명`,
-      unread: 0,
-      accent: getRoomAccent(chatRooms.length + 1),
-      status: '단톡',
-      type: 'group',
-      participantIds,
-    }
+    const subtitle = `${authSession.nickname}님이 만든 단톡방`
 
     try {
-      if (isFirebaseConfigured && db) {
-        const roomDoc = await addDoc(collection(db, 'rooms'), {
-          name: nextRoom.name,
-          subtitle: nextRoom.subtitle,
-          status: nextRoom.status,
-          type: 'group',
-          participantIds,
-          createdBy: authSession.uid,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        })
-        roomId = roomDoc.id
+      if (!isFirebaseConfigured || !db) {
+        setConnectionState('error')
+        setAdminNotice('Firebase 연결을 확인해주세요.')
+        return
       }
 
-      const createdRoom = { ...nextRoom, id: roomId }
-      setChatRooms((currentRooms) => [createdRoom, ...currentRooms])
-      setMessagesByRoom((currentMessages) => ({
-        ...currentMessages,
-        [roomId]: currentMessages[roomId] ?? [],
-      }))
+      const roomDoc = await addDoc(collection(db, 'rooms'), {
+        name: roomName,
+        subtitle,
+        status: '단톡',
+        type: 'group',
+        participantIds,
+        createdBy: authSession.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+
       setGroupName('')
-      setActiveRoomId(roomId)
+      setActiveRoomId(roomDoc.id)
+      setConnectionState('connecting')
       setAdminNotice(`${roomName} 단톡방을 만들었습니다.`)
     } catch {
       setAdminNotice('단톡방을 만들지 못했습니다. 권한과 규칙을 확인해주세요.')
@@ -981,23 +777,19 @@ function App() {
     const nextStatus: UserStatus = user.status === 'active' ? 'blocked' : 'active'
 
     try {
-      if (isFirebaseConfigured && db) {
-        await setDoc(
-          doc(db, 'users', user.id),
-          {
-            status: nextStatus,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true },
-        )
+      if (!isFirebaseConfigured || !db) {
+        setConnectionState('error')
+        setAdminNotice('Firebase 연결을 확인해주세요.')
+        return
       }
 
-      setManagedUsers((currentUsers) =>
-        currentUsers.map((currentUser) =>
-          currentUser.id === user.id
-            ? { ...currentUser, status: nextStatus }
-            : currentUser,
-        ),
+      await setDoc(
+        doc(db, 'users', user.id),
+        {
+          status: nextStatus,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
       )
       setAdminNotice(`${user.nickname}님을 ${statusCopy[nextStatus]} 상태로 변경했습니다.`)
     } catch {
@@ -1014,21 +806,19 @@ function App() {
     const nextRole: UserRole = user.role === 'admin' ? 'user' : 'admin'
 
     try {
-      if (isFirebaseConfigured && db) {
-        await setDoc(
-          doc(db, 'users', user.id),
-          {
-            role: nextRole,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true },
-        )
+      if (!isFirebaseConfigured || !db) {
+        setConnectionState('error')
+        setAdminNotice('Firebase 연결을 확인해주세요.')
+        return
       }
 
-      setManagedUsers((currentUsers) =>
-        currentUsers.map((currentUser) =>
-          currentUser.id === user.id ? { ...currentUser, role: nextRole } : currentUser,
-        ),
+      await setDoc(
+        doc(db, 'users', user.id),
+        {
+          role: nextRole,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
       )
       setAdminNotice(`${user.nickname}님 권한을 ${roleCopy[nextRole]}으로 변경했습니다.`)
     } catch {
@@ -1041,38 +831,45 @@ function App() {
 
     const text = draft.trim()
 
-    if (!text || !authSession || !canSendMessage) {
+    if (!text || !authSession || !canSendMessage || !activeRoomId) {
       return
     }
 
-    const localMessage: ChatMessage = {
-      id: makeLocalId(),
-      roomId: activeRoomId,
-      author: '나',
-      authorId: currentUserId,
-      text,
-      time: formatTime(),
-      isMine: true,
+    if (!isFirebaseConfigured || !db || !auth?.currentUser) {
+      setConnectionState('error')
+      setAdminNotice('Firebase 연결을 확인해주세요.')
+      return
     }
 
-    setDraft('')
-
-    if (isFirebaseConfigured && db && auth?.currentUser && connectionState !== 'error') {
-      try {
-        await addDoc(collection(db, 'rooms', activeRoomId, 'messages'), {
-          roomId: activeRoomId,
-          authorId: auth.currentUser.uid,
-          authorName: authSession.nickname,
-          text,
-          createdAt: serverTimestamp(),
-        })
-        return
-      } catch {
-        setConnectionState('error')
-      }
+    try {
+      await addDoc(collection(db, 'rooms', activeRoomId, 'messages'), {
+        roomId: activeRoomId,
+        authorId: auth.currentUser.uid,
+        authorName: authSession.nickname,
+        text,
+        createdAt: serverTimestamp(),
+      })
+      setDraft('')
+    } catch {
+      setConnectionState('error')
+      setAdminNotice('메시지를 저장하지 못했습니다. 권한과 규칙을 확인해주세요.')
     }
+  }
 
-    appendLocalMessage(localMessage)
+  if (!isFirebaseConfigured) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card auth-loading" aria-live="polite">
+          <span className="brand-mark auth-brand">
+            <ShieldCheck size={28} strokeWidth={2.4} />
+          </span>
+          <h1>Firebase 설정 필요</h1>
+          <p className="form-message is-error">
+            .env의 VITE_FIREBASE_* 값을 채워야 GreenTalk를 실행할 수 있습니다.
+          </p>
+        </section>
+      </main>
+    )
   }
 
   if (!authReady) {
@@ -1198,12 +995,6 @@ function App() {
               {isAuthSubmitting ? '처리 중' : authModeCopy[authMode]}
             </button>
 
-            {!isFirebaseConfigured && (
-              <div className="demo-note">
-                <ShieldCheck size={17} />
-                <span>데모에서 관리자 확인은 이메일에 admin을 넣어 로그인하세요.</span>
-              </div>
-            )}
           </form>
         </section>
       </main>
@@ -1348,30 +1139,40 @@ function App() {
         {adminNotice && <p className="admin-notice">{adminNotice}</p>}
 
         <div className="room-list">
-          {filteredRooms.map((room) => (
-            <button
-              className={`room-row ${room.id === activeRoomId ? 'is-active' : ''}`}
-              key={room.id}
-              type="button"
-              onClick={() => handleSelectRoom(room.id)}
-            >
-              <span className="avatar" style={{ backgroundColor: room.accent }}>
-                {room.name.slice(0, 1)}
-              </span>
-              <span className="room-copy">
-                <span className="room-name">
-                  {room.name}
-                  <small>{room.members}</small>
+          {filteredRooms.length > 0 ? (
+            filteredRooms.map((room) => (
+              <button
+                className={`room-row ${room.id === activeRoomId ? 'is-active' : ''}`}
+                key={room.id}
+                type="button"
+                onClick={() => handleSelectRoom(room.id)}
+              >
+                <span className="avatar" style={{ backgroundColor: room.accent }}>
+                  {room.name.slice(0, 1)}
                 </span>
-                <span className="room-subtitle">{room.subtitle}</span>
-              </span>
-              {room.unread > 0 && <span className="unread-count">{room.unread}</span>}
-            </button>
-          ))}
+                <span className="room-copy">
+                  <span className="room-name">
+                    {room.name}
+                    <small>{room.members}</small>
+                  </span>
+                  <span className="room-subtitle">{room.subtitle}</span>
+                </span>
+                {room.unread > 0 && <span className="unread-count">{room.unread}</span>}
+              </button>
+            ))
+          ) : (
+            <div className="room-empty">
+              <MessageCircle size={28} />
+              <p>표시할 채팅방이 없습니다.</p>
+            </div>
+          )}
         </div>
       </section>
 
-      <section className="conversation-panel" aria-label={`${activeRoom.name} 대화`}>
+      <section
+        className="conversation-panel"
+        aria-label={activeRoom ? `${activeRoom.name} 대화` : '대화'}
+      >
         <div className="mobile-room-tabs" aria-label="모바일 채팅방 전환">
           {chatRooms.map((room) => (
             <button
@@ -1387,32 +1188,60 @@ function App() {
 
         <header className="chat-header">
           <div className="chat-title">
-            <span className="avatar large" style={{ backgroundColor: activeRoom.accent }}>
-              {activeRoom.name.slice(0, 1)}
+            <span
+              className="avatar large"
+              style={{ backgroundColor: activeRoom?.accent ?? '#7a8a84' }}
+            >
+              {(activeRoom?.name ?? 'G').slice(0, 1)}
             </span>
             <div>
-              <h2>{activeRoom.name}</h2>
+              <h2>{activeRoom?.name ?? '채팅방 없음'}</h2>
               <p>
-                {activeRoom.members} · {activeRoom.status}
+                {activeRoom
+                  ? `${activeRoom.members} · ${activeRoom.status}`
+                  : '관리자가 만든 채팅방이 표시됩니다.'}
               </p>
             </div>
           </div>
           <div className="chat-actions">
-            <button className="icon-button" type="button" aria-label="음성 통화" title="음성 통화">
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="음성 통화"
+              title="음성 통화"
+              disabled={!activeRoom}
+            >
               <Phone size={19} />
             </button>
-            <button className="icon-button" type="button" aria-label="영상 통화" title="영상 통화">
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="영상 통화"
+              title="영상 통화"
+              disabled={!activeRoom}
+            >
               <Video size={19} />
             </button>
-            <button className="icon-button" type="button" aria-label="대화 정보" title="대화 정보">
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="대화 정보"
+              title="대화 정보"
+              disabled={!activeRoom}
+            >
               <Info size={19} />
             </button>
           </div>
         </header>
 
         <div className="message-list" aria-live="polite">
-          <div className="day-divider">오늘</div>
-          {visibleMessages.length > 0 ? (
+          {activeRoom && <div className="day-divider">오늘</div>}
+          {!activeRoom ? (
+            <div className="empty-state">
+              <MessageCircle size={34} />
+              <p>채팅방을 선택하거나 관리자가 새 대화를 만들어주세요.</p>
+            </div>
+          ) : visibleMessages.length > 0 ? (
             visibleMessages.map((message) => (
               <article
                 className={`message-row ${message.isMine ? 'is-mine' : ''}`}
@@ -1456,9 +1285,13 @@ function App() {
             disabled={!canSendMessage}
             onChange={(event) => setDraft(event.target.value)}
             placeholder={
-              canSendMessage
-                ? `${activeRoom.name}에 메시지 보내기`
-                : '차단된 계정은 메시지를 보낼 수 없습니다.'
+              !activeRoom
+                ? '채팅방을 선택해주세요.'
+                : canSendMessage
+                  ? `${activeRoom.name}에 메시지 보내기`
+                  : connectionState === 'error'
+                    ? 'Firebase 연결을 확인해주세요.'
+                    : '차단된 계정은 메시지를 보낼 수 없습니다.'
             }
             aria-label="메시지 입력"
           />
@@ -1484,19 +1317,22 @@ function App() {
           </button>
         </div>
         <div className="profile-card">
-          <span className="profile-avatar" style={{ backgroundColor: activeRoom.accent }}>
-            {activeRoom.name.slice(0, 1)}
+          <span
+            className="profile-avatar"
+            style={{ backgroundColor: activeRoom?.accent ?? '#7a8a84' }}
+          >
+            {(activeRoom?.name ?? 'G').slice(0, 1)}
           </span>
-          <h2>{activeRoom.name}</h2>
-          <p>{activeRoom.subtitle}</p>
+          <h2>{activeRoom?.name ?? '채팅방 없음'}</h2>
+          <p>{activeRoom?.subtitle ?? 'Firestore에서 불러온 채팅방이 여기에 표시됩니다.'}</p>
           <div className="profile-actions">
-            <button type="button" aria-label="통화" title="통화">
+            <button type="button" aria-label="통화" title="통화" disabled={!activeRoom}>
               <Phone size={18} />
             </button>
-            <button type="button" aria-label="영상" title="영상">
+            <button type="button" aria-label="영상" title="영상" disabled={!activeRoom}>
               <Video size={18} />
             </button>
-            <button type="button" aria-label="검색" title="검색">
+            <button type="button" aria-label="검색" title="검색" disabled={!activeRoom}>
               <Search size={18} />
             </button>
           </div>

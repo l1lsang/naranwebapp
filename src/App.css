@@ -277,19 +277,6 @@ button:disabled {
   background: #05b94f;
 }
 
-.demo-note {
-  min-height: 40px;
-  border-radius: 8px;
-  color: #416057;
-  background: #eef8f2;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  font-size: 12px;
-  font-weight: 800;
-}
-
 .rail {
   background: #12342d;
   color: #ffffff;
@@ -570,6 +557,22 @@ h3 {
   gap: 6px;
   overflow-y: auto;
   padding-right: 2px;
+}
+
+.room-empty {
+  min-height: 132px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: #f8faf9;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  padding: 18px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .room-row {
