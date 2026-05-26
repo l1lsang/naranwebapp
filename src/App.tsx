@@ -475,12 +475,6 @@ const getDirectPeerId = (room: ChatRoom | undefined, currentUserId: string | und
   return room.participantIds?.find((participantId) => participantId !== currentUserId) ?? ''
 }
 
-const connectionCopy: Record<ConnectionState, string> = {
-  connecting: '연결 중',
-  live: '실시간 연결됨',
-  error: '연결 확인 필요',
-}
-
 const authModeCopy: Record<AuthMode, string> = {
   login: '로그인',
   signup: '회원가입',
@@ -788,11 +782,6 @@ function App() {
 
     return nextBadges
   }, [authSession, readReceipts, visibleMessages])
-
-  const unreadTotal = useMemo(
-    () => chatRooms.reduce((total, room) => total + room.unread, 0),
-    [chatRooms],
-  )
 
   useEffect(() => {
     if (localVideoRef.current) {
@@ -1751,6 +1740,16 @@ function App() {
     setIsCameraOff(false)
   }
 
+  const endCallLocally = (notice: string) => {
+    teardownCallResources()
+    setActiveCallId('')
+    setCallPhase('ended')
+    setCallNotice(notice)
+    setIncomingCall(null)
+    setIsMicMuted(false)
+    setIsCameraOff(false)
+  }
+
   const getLocalCallStream = async (mode: CallMode) => {
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error('Media devices are not available.')
@@ -1783,9 +1782,13 @@ function App() {
     const candidates = [...pendingLocalCandidatesRef.current]
     pendingLocalCandidatesRef.current = []
 
-    await Promise.all(
+    const results = await Promise.allSettled(
       candidates.map((candidate) => sendLocalCandidate(callId, side, candidate)),
     )
+
+    if (results.some((result) => result.status === 'rejected')) {
+      setCallNotice('통화 연결 정보를 일부 보내지 못했습니다. 잠시 후 다시 시도해주세요.')
+    }
   }
 
   const addRemoteCandidate = async (candidate: RTCIceCandidateInit) => {
@@ -1906,8 +1909,15 @@ function App() {
           ? normalizeCallSignal(snapshot.id, snapshot.data() as StoredCall)
           : undefined
 
-        if (!signal || signal.status === 'ended' || signal.status === 'declined') {
-          resetCallState()
+        if (!signal) {
+          endCallLocally('통화 요청 정보를 찾지 못했습니다.')
+          return
+        }
+
+        if (signal.status === 'ended' || signal.status === 'declined') {
+          endCallLocally(
+            signal.status === 'declined' ? '상대가 전화를 거절했습니다.' : '통화가 종료되었습니다.',
+          )
           return
         }
 
@@ -2018,8 +2028,7 @@ function App() {
         }
       })
     } catch {
-      setAdminNotice('통화를 시작하지 못했습니다. 마이크/카메라 권한을 확인해주세요.')
-      resetCallState()
+      endCallLocally('통화를 시작하지 못했습니다. 마이크/카메라 권한 또는 Firebase 규칙을 확인해주세요.')
     }
   }
 
@@ -2104,8 +2113,7 @@ function App() {
         },
         { merge: true },
       ).catch(() => undefined)
-      setAdminNotice('전화를 받을 수 없습니다. 마이크/카메라 권한을 확인해주세요.')
-      resetCallState()
+      endCallLocally('전화를 받을 수 없습니다. 마이크/카메라 권한 또는 Firebase 규칙을 확인해주세요.')
     }
   }
 
@@ -3516,12 +3524,6 @@ function App() {
             placeholder="이름, 메시지 검색"
           />
         </label>
-
-        <div className="connection-strip">
-          <span className={`status-light is-${connectionState}`} />
-          <span>{connectionCopy[connectionState]}</span>
-          <strong>{unreadTotal}</strong>
-        </div>
 
         {isAdmin ? (
           <div className="admin-quick-actions">

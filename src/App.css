@@ -471,51 +471,6 @@ h3 {
   color: #9aa4a1;
 }
 
-.connection-strip {
-  min-height: 38px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--muted);
-  background: #ffffff;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 0 11px;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.connection-strip strong {
-  width: 28px;
-  height: 24px;
-  margin-left: auto;
-  border-radius: 8px;
-  color: #ffffff;
-  background: var(--line-green);
-  display: grid;
-  place-items: center;
-  font-size: 12px;
-}
-
-.status-light {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  background: #9aa4a1;
-}
-
-.status-light.is-live {
-  background: var(--line-green);
-}
-
-.status-light.is-connecting {
-  background: #ffb224;
-}
-
-.status-light.is-error {
-  background: #ff5b4a;
-}
-
 .admin-quick-actions {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
