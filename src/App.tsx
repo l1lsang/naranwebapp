@@ -21,7 +21,6 @@ import {
   LogOut,
   Mail,
   MessageCircle,
-  Mic,
   MoreHorizontal,
   Newspaper,
   Paperclip,
@@ -2215,9 +2214,6 @@ function App() {
             }
             aria-label="메시지 입력"
           />
-          <button className="mic-button" type="button" aria-label="음성 입력" title="음성 입력">
-            <Mic size={19} />
-          </button>
           <button
             className="send-button"
             type="submit"

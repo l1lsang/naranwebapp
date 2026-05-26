@@ -1028,7 +1028,7 @@ h3 {
   border-top: 1px solid rgba(18, 52, 45, 0.08);
   background: #ffffff;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) 40px 44px;
+  grid-template-columns: auto minmax(0, 1fr) 44px;
   align-items: center;
   gap: 10px;
   padding: 12px 18px;
@@ -1512,6 +1512,10 @@ h3 {
     padding-bottom: calc(72px + env(safe-area-inset-bottom));
   }
 
+  .app-shell.is-mobile-chat-open {
+    padding-bottom: 0;
+  }
+
   .rail,
   .detail-panel {
     display: none;
@@ -1535,6 +1539,7 @@ h3 {
 
   .app-shell.is-mobile-tab-chats.is-mobile-chat-open .conversation-panel {
     display: grid;
+    min-height: 100svh;
   }
 
   .app-shell.is-mobile-tab-friends .mobile-tab-page.is-friends,
@@ -1610,9 +1615,12 @@ h3 {
     padding: 10px 12px;
   }
 
+  .app-shell.is-mobile-chat-open .composer {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
   .composer-tools button:nth-child(2),
-  .composer-tools button:nth-child(3),
-  .mic-button {
+  .composer-tools button:nth-child(3) {
     display: none;
   }
 
@@ -1670,5 +1678,9 @@ h3 {
   .mobile-tab-bar svg {
     width: 21px;
     height: 21px;
+  }
+
+  .app-shell.is-mobile-chat-open .mobile-tab-bar {
+    display: none;
   }
 }
