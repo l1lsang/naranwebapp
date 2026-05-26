@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -21,10 +22,13 @@ import {
   LogOut,
   Mail,
   MessageCircle,
+  Mic,
+  MicOff,
   MoreHorizontal,
   Newspaper,
   Paperclip,
   Phone,
+  PhoneOff,
   Plus,
   Search,
   Send,
@@ -35,6 +39,7 @@ import {
   UploadCloud,
   UserRound,
   Video,
+  VideoOff,
   X,
 } from 'lucide-react'
 import {
@@ -63,6 +68,7 @@ import {
   serverTimestamp,
   setDoc,
   Timestamp,
+  where,
 } from 'firebase/firestore'
 import {
   deleteObject,
@@ -83,6 +89,12 @@ type RoomType = 'group' | 'direct'
 type AttachmentKind = 'image' | 'file'
 type MobileTab = 'friends' | 'chats' | 'news' | 'calls'
 type RetentionPolicy = 'oneDay' | 'oneMonth'
+type CallMode = 'voice' | 'video'
+
+type ParticipantProfile = {
+  nickname: string
+  photoURL: string
+}
 
 type AuthSession = {
   uid: string
@@ -116,6 +128,7 @@ type ChatRoom = {
   type: RoomType
   retentionPolicy: RetentionPolicy
   participantIds?: string[]
+  participantProfiles: Record<string, ParticipantProfile>
 }
 
 type ChatMessage = {
@@ -167,6 +180,7 @@ type StoredRoom = {
   avatarPath?: unknown
   retentionPolicy?: unknown
   participantIds?: unknown
+  participantProfiles?: unknown
 }
 
 type StoredUserProfile = {
@@ -313,6 +327,41 @@ const normalizeAttachment = (attachment: unknown): MessageAttachment | undefined
   }
 }
 
+const normalizeParticipantProfiles = (profiles: unknown): Record<string, ParticipantProfile> => {
+  if (!profiles || typeof profiles !== 'object' || Array.isArray(profiles)) {
+    return {}
+  }
+
+  return Object.entries(profiles as Record<string, unknown>).reduce<
+    Record<string, ParticipantProfile>
+  >((nextProfiles, [userId, profile]) => {
+    if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+      return nextProfiles
+    }
+
+    const data = profile as Record<string, unknown>
+    const nickname = typeof data.nickname === 'string' ? data.nickname : ''
+    const photoURL = typeof data.photoURL === 'string' ? data.photoURL : ''
+
+    if (userId && nickname) {
+      nextProfiles[userId] = {
+        nickname,
+        photoURL,
+      }
+    }
+
+    return nextProfiles
+  }, {})
+}
+
+const getDirectPeerId = (room: ChatRoom | undefined, currentUserId: string | undefined) => {
+  if (!room || room.type !== 'direct' || !currentUserId) {
+    return ''
+  }
+
+  return room.participantIds?.find((participantId) => participantId !== currentUserId) ?? ''
+}
+
 const connectionCopy: Record<ConnectionState, string> = {
   connecting: '연결 중',
   live: '실시간 연결됨',
@@ -424,6 +473,11 @@ function App() {
   const [isSettingsSubmitting, setIsSettingsSubmitting] = useState(false)
   const [isProfileImageUploading, setIsProfileImageUploading] = useState(false)
   const [profileImageProgress, setProfileImageProgress] = useState(0)
+  const [isRoomSettingsOpen, setIsRoomSettingsOpen] = useState(false)
+  const [callMode, setCallMode] = useState<CallMode | null>(null)
+  const [callRoomId, setCallRoomId] = useState('')
+  const [isMicMuted, setIsMicMuted] = useState(false)
+  const [isCameraOff, setIsCameraOff] = useState(false)
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([])
   const [adminPanel, setAdminPanel] = useState<AdminPanel>('users')
   const [adminNotice, setAdminNotice] = useState('')
@@ -451,6 +505,11 @@ function App() {
   const activeRoom = useMemo(
     () => chatRooms.find((room) => room.id === activeRoomId),
     [activeRoomId, chatRooms],
+  )
+
+  const callRoom = useMemo(
+    () => chatRooms.find((room) => room.id === callRoomId),
+    [callRoomId, chatRooms],
   )
 
   const mobileDirectRooms = useMemo(
@@ -481,6 +540,71 @@ function App() {
     [authSession?.uid, managedUsers],
   )
 
+  const userProfileById = useMemo(() => {
+    const nextProfiles: Record<string, ParticipantProfile> = {}
+
+    if (authSession) {
+      nextProfiles[authSession.uid] = {
+        nickname: authSession.nickname,
+        photoURL: authSession.photoURL,
+      }
+    }
+
+    managedUsers.forEach((user) => {
+      nextProfiles[user.id] = {
+        nickname: user.nickname,
+        photoURL: user.photoURL ?? '',
+      }
+    })
+
+    chatRooms.forEach((room) => {
+      Object.entries(room.participantProfiles).forEach(([userId, profile]) => {
+        if (!nextProfiles[userId]) {
+          nextProfiles[userId] = profile
+        }
+      })
+    })
+
+    return nextProfiles
+  }, [authSession, chatRooms, managedUsers])
+
+  const getParticipantProfilesForIds = useCallback(
+    (participantIds: string[]) =>
+      participantIds.reduce<Record<string, ParticipantProfile>>((nextProfiles, participantId) => {
+        const profile = userProfileById[participantId]
+
+        if (profile) {
+          nextProfiles[participantId] = profile
+        }
+
+        return nextProfiles
+      }, {}),
+    [userProfileById],
+  )
+
+  const getRoomDisplay = useCallback((room: ChatRoom | undefined) => {
+    if (!room) {
+      return {
+        name: '채팅방 없음',
+        subtitle: '채팅방 정보가 여기에 표시됩니다.',
+        avatarURL: '',
+        accent: '#7a8a84',
+      }
+    }
+
+    const peerId = getDirectPeerId(room, authSession?.uid)
+    const peerProfile = peerId
+      ? userProfileById[peerId] ?? room.participantProfiles[peerId]
+      : undefined
+
+    return {
+      name: peerProfile?.nickname || room.name,
+      subtitle: room.subtitle,
+      avatarURL: peerProfile?.photoURL || room.avatarURL,
+      accent: room.accent,
+    }
+  }, [authSession?.uid, userProfileById])
+
   const filteredRooms = useMemo(() => {
     const normalizedTerm = searchTerm.trim().toLowerCase()
 
@@ -488,12 +612,14 @@ function App() {
       return chatRooms
     }
 
-    return chatRooms.filter((room) =>
-      `${room.name} ${room.subtitle} ${room.status}`
+    return chatRooms.filter((room) => {
+      const display = getRoomDisplay(room)
+
+      return `${display.name} ${room.name} ${display.subtitle} ${room.status}`
         .toLowerCase()
-        .includes(normalizedTerm),
-    )
-  }, [chatRooms, searchTerm])
+        .includes(normalizedTerm)
+    })
+  }, [chatRooms, getRoomDisplay, searchTerm])
 
   const visibleMessages = useMemo(
     () => (activeRoom && authSession ? remoteMessages : []),
@@ -555,6 +681,9 @@ function App() {
         setIsMobileChatOpen(false)
         setRetentionRoomId('')
         setAppearanceRoomId('')
+        setIsRoomSettingsOpen(false)
+        setCallMode(null)
+        setCallRoomId('')
         setAuthReady(true)
         return
       }
@@ -595,7 +724,14 @@ function App() {
       return
     }
 
-    const roomsQuery = query(collection(db, 'rooms'), limit(120))
+    const roomsQuery =
+      authSession.role === 'admin'
+        ? query(collection(db, 'rooms'), limit(120))
+        : query(
+            collection(db, 'rooms'),
+            where('participantIds', 'array-contains', authSession.uid),
+            limit(120),
+          )
 
     const unsubscribe = onSnapshot(
       roomsQuery,
@@ -626,6 +762,7 @@ function App() {
               type,
               retentionPolicy: normalizeRetentionPolicy(data.retentionPolicy),
               participantIds,
+              participantProfiles: normalizeParticipantProfiles(data.participantProfiles),
             }
           })
           .filter(
@@ -694,6 +831,63 @@ function App() {
 
     return unsubscribe
   }, [authSession])
+
+  useEffect(() => {
+    if (!authSession || !isAdmin || !isFirebaseConfigured || !db || chatRooms.length === 0) {
+      return
+    }
+
+    const firestore = db
+
+    const updateJobs = chatRooms
+      .map((room) => {
+        const participantProfiles = getParticipantProfilesForIds(room.participantIds ?? [])
+        const profileEntries = Object.entries(participantProfiles)
+
+        if (profileEntries.length === 0) {
+          return null
+        }
+
+        const shouldUpdateProfiles = profileEntries.some(([userId, profile]) => {
+          const currentProfile = room.participantProfiles[userId]
+
+          return (
+            currentProfile?.nickname !== profile.nickname ||
+            currentProfile?.photoURL !== profile.photoURL
+          )
+        })
+        const peerId = getDirectPeerId(room, authSession.uid)
+        const peerPhotoURL = peerId ? participantProfiles[peerId]?.photoURL ?? '' : ''
+        const shouldUpdateDirectAvatar =
+          room.type === 'direct' && room.avatarURL !== peerPhotoURL
+
+        if (!shouldUpdateProfiles && !shouldUpdateDirectAvatar) {
+          return null
+        }
+
+        return setDoc(
+          doc(firestore, 'rooms', room.id),
+          {
+            participantProfiles: {
+              ...room.participantProfiles,
+              ...participantProfiles,
+            },
+            ...(shouldUpdateDirectAvatar ? { avatarURL: peerPhotoURL } : {}),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        )
+      })
+      .filter((job): job is Promise<void> => Boolean(job))
+
+    if (updateJobs.length === 0) {
+      return
+    }
+
+    void Promise.all(updateJobs).catch(() => {
+      setAdminNotice('일부 채팅방 프로필 사진을 동기화하지 못했습니다.')
+    })
+  }, [authSession, chatRooms, getParticipantProfilesForIds, isAdmin])
 
   useEffect(() => {
     if (!authSession || !isFirebaseConfigured || !db || !activeRoomId) {
@@ -1204,6 +1398,9 @@ function App() {
       setIsMobileChatOpen(false)
       setRetentionRoomId('')
       setAppearanceRoomId('')
+      setIsRoomSettingsOpen(false)
+      setCallMode(null)
+      setCallRoomId('')
     } catch (error) {
       setSettingsError(getAuthErrorMessage(error))
     } finally {
@@ -1222,6 +1419,9 @@ function App() {
     setIsMobileChatOpen(false)
     setRetentionRoomId('')
     setAppearanceRoomId('')
+    setIsRoomSettingsOpen(false)
+    setCallMode(null)
+    setCallRoomId('')
 
     if (isFirebaseConfigured && auth) {
       await signOut(auth)
@@ -1239,6 +1439,9 @@ function App() {
     setIsMobileChatOpen(false)
     setRetentionRoomId('')
     setAppearanceRoomId('')
+    setIsRoomSettingsOpen(false)
+    setCallMode(null)
+    setCallRoomId('')
     setConnectionState('error')
   }
 
@@ -1253,7 +1456,13 @@ function App() {
   }
 
   const handleSelectRoom = (roomId: string) => {
+    const selectedRoom = chatRooms.find((room) => room.id === roomId)
+
     setActiveRoomId(roomId)
+    setRetentionRoomId(roomId)
+    if (selectedRoom?.type === 'group') {
+      setAppearanceRoomId(roomId)
+    }
     setMobileTab('chats')
     setIsMobileChatOpen(true)
     setConnectionState('connecting')
@@ -1277,6 +1486,50 @@ function App() {
     setRemoteMessages([])
     setReadReceipts([])
     setDraft('')
+  }
+
+  const openRoomSettings = (roomId = activeRoomId) => {
+    const targetRoom = chatRooms.find((room) => room.id === roomId)
+
+    if (!targetRoom) {
+      return
+    }
+
+    setActiveRoomId(targetRoom.id)
+    setRetentionRoomId(targetRoom.id)
+    if (targetRoom.type === 'group') {
+      setAppearanceRoomId(targetRoom.id)
+    }
+    setIsRoomSettingsOpen(true)
+  }
+
+  const closeRoomSettings = () => {
+    if (isRoomImageUploading) {
+      return
+    }
+
+    setIsRoomSettingsOpen(false)
+  }
+
+  const openCall = (mode: CallMode, roomId = activeRoomId) => {
+    const targetRoom = chatRooms.find((room) => room.id === roomId)
+
+    if (!targetRoom) {
+      return
+    }
+
+    setActiveRoomId(targetRoom.id)
+    setCallRoomId(targetRoom.id)
+    setCallMode(mode)
+    setIsMicMuted(false)
+    setIsCameraOff(mode === 'voice')
+  }
+
+  const closeCall = () => {
+    setCallMode(null)
+    setCallRoomId('')
+    setIsMicMuted(false)
+    setIsCameraOff(false)
   }
 
   const handleCreateDirectChat = async (event: FormEvent<HTMLFormElement>) => {
@@ -1314,6 +1567,16 @@ function App() {
     }
 
     const participantIds = [authSession.uid, targetUser.id]
+    const participantProfiles = {
+      [authSession.uid]: {
+        nickname: authSession.nickname,
+        photoURL: authSession.photoURL,
+      },
+      [targetUser.id]: {
+        nickname: targetUser.nickname,
+        photoURL: targetUser.photoURL ?? '',
+      },
+    }
     const subtitle = `${authSession.nickname}님이 시작한 1:1 대화`
 
     try {
@@ -1334,6 +1597,15 @@ function App() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       })
+      await setDoc(
+        doc(db, 'rooms', roomDoc.id),
+        {
+          avatarURL: targetUser.photoURL ?? '',
+          participantProfiles,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      )
 
       setActiveRoomId(roomDoc.id)
       setRetentionRoomId(roomDoc.id)
@@ -1376,6 +1648,7 @@ function App() {
     }
 
     const participantIds = [authSession.uid, ...selectedGroupMemberIds]
+    const participantProfiles = getParticipantProfilesForIds(participantIds)
     const subtitle = `${authSession.nickname}님이 만든 단톡방`
 
     try {
@@ -1396,6 +1669,14 @@ function App() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       })
+      await setDoc(
+        doc(db, 'rooms', roomDoc.id),
+        {
+          participantProfiles,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      )
 
       setGroupName('')
       setActiveRoomId(roomDoc.id)
@@ -2012,11 +2293,22 @@ function App() {
   }
 
   const renderRoomAvatar = (room: ChatRoom | undefined, className = 'avatar') => {
-    const roomName = room?.name ?? 'G'
+    const display = getRoomDisplay(room)
+    const roomName = display.name || 'G'
 
     return (
-      <span className={className} style={{ backgroundColor: room?.accent ?? '#7a8a84' }}>
-        {room?.avatarURL ? <img src={room.avatarURL} alt={roomName} /> : roomName.slice(0, 1)}
+      <span className={className} style={{ backgroundColor: display.accent }}>
+        {display.avatarURL ? <img src={display.avatarURL} alt={roomName} /> : roomName.slice(0, 1)}
+      </span>
+    )
+  }
+
+  const renderUserAvatar = (nickname: string, photoURL = '', className = 'avatar small') => {
+    const displayName = nickname || '친구'
+
+    return (
+      <span className={className} style={{ backgroundColor: photoURL ? '#12342d' : undefined }}>
+        {photoURL ? <img src={photoURL} alt={displayName} /> : displayName.slice(0, 1)}
       </span>
     )
   }
@@ -2069,7 +2361,7 @@ function App() {
           <div className="managed-user-list">
             {managedUsers.map((user) => (
               <article className="managed-user-row" key={user.id}>
-                <span className="avatar small">{user.nickname.slice(0, 1)}</span>
+                {renderUserAvatar(user.nickname, user.photoURL)}
                 <div>
                   <strong>{user.nickname}</strong>
                   <span>{user.email || '이메일 없음'}</span>
@@ -2159,7 +2451,7 @@ function App() {
               >
                 {chatRooms.map((room) => (
                   <option key={room.id} value={room.id}>
-                    {room.name} · {retentionCopy[room.retentionPolicy]}
+                    {getRoomDisplay(room).name} · {retentionCopy[room.retentionPolicy]}
                   </option>
                 ))}
               </select>
@@ -2277,6 +2569,230 @@ function App() {
       </div>
     )
   }
+
+  const renderRoomSettingsDialog = () => {
+    if (!isRoomSettingsOpen || !activeRoom) {
+      return null
+    }
+
+    const display = getRoomDisplay(activeRoom)
+
+    return (
+      <div className="settings-backdrop" role="presentation">
+        <section className="settings-dialog room-settings-dialog" aria-label="톡방 설정">
+          <header className="settings-header">
+            <div>
+              <p className="eyebrow">GreenTalk</p>
+              <h2>톡방 설정</h2>
+            </div>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={closeRoomSettings}
+              aria-label="닫기"
+            >
+              <X size={20} />
+            </button>
+          </header>
+
+          <div className="room-settings-summary">
+            {renderRoomAvatar(activeRoom, 'profile-avatar room-settings-avatar')}
+            <div>
+              <strong>{display.name}</strong>
+              <span>
+                {activeRoom.members} · {activeRoom.status}
+              </span>
+            </div>
+          </div>
+
+          {isAdmin ? (
+            <>
+              <section className="settings-section">
+                <div className="settings-section-title">
+                  <Trash2 size={18} />
+                  <h3>삭제 정책</h3>
+                </div>
+                <div className="retention-options" role="radiogroup" aria-label="삭제 정책">
+                  {(['oneDay', 'oneMonth'] as RetentionPolicy[]).map((policy) => (
+                    <button
+                      className={activeRoom.retentionPolicy === policy ? 'is-active' : ''}
+                      key={policy}
+                      type="button"
+                      onClick={() => void handleUpdateRoomRetention(activeRoom.id, policy)}
+                      aria-pressed={activeRoom.retentionPolicy === policy}
+                    >
+                      <strong>{retentionCopy[policy]}</strong>
+                      <small>{retentionDescription[policy]}</small>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {activeRoom.type === 'group' ? (
+                <section className="settings-section">
+                  <div className="settings-section-title">
+                    <ImageIcon size={18} />
+                    <h3>단톡방 이미지</h3>
+                  </div>
+                  <div className="room-appearance-card">
+                    {renderRoomAvatar(activeRoom, 'profile-avatar room-avatar-preview')}
+                    <div>
+                      <strong>{display.name}</strong>
+                      <span>{activeRoom.avatarURL ? '이미지 사용 중' : '색상 사용 중'}</span>
+                    </div>
+                  </div>
+                  <div className="appearance-actions">
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={() => roomImageInputRef.current?.click()}
+                      disabled={isRoomImageUploading}
+                    >
+                      {isRoomImageUploading ? `업로드 중 ${roomImageProgress}%` : '이미지 변경'}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => void handleClearRoomImage(activeRoom.id)}
+                      disabled={!activeRoom.avatarURL || isRoomImageUploading}
+                    >
+                      이미지 제거
+                    </button>
+                  </div>
+                  <div className="color-swatches" aria-label="단톡방 색상">
+                    {roomColorSwatches.map((color) => (
+                      <button
+                        className={activeRoom.accent === color ? 'is-active' : ''}
+                        key={color}
+                        type="button"
+                        onClick={() => void handleUpdateRoomAccent(activeRoom.id, color)}
+                        aria-label={`${color} 색상`}
+                        title={color}
+                      >
+                        <span style={{ backgroundColor: color }} />
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ) : (
+                <section className="settings-section">
+                  <div className="settings-section-title">
+                    <UserRound size={18} />
+                    <h3>1:1 프로필</h3>
+                  </div>
+                  <p className="retention-note">상대 프로필 사진과 이름이 채팅 목록에 표시됩니다.</p>
+                </section>
+              )}
+            </>
+          ) : (
+            <section className="settings-section">
+              <div className="settings-section-title">
+                <Info size={18} />
+                <h3>방 정보</h3>
+              </div>
+              <p className="retention-note">
+                {retentionCopy[activeRoom.retentionPolicy]} · {display.subtitle}
+              </p>
+            </section>
+          )}
+        </section>
+      </div>
+    )
+  }
+
+  const renderCallDialog = () => {
+    if (!callMode || !callRoom) {
+      return null
+    }
+
+    const display = getRoomDisplay(callRoom)
+    const isVideoCall = callMode === 'video'
+    const callTitle = isVideoCall ? '영상통화' : '음성 채팅'
+
+    return (
+      <div className="call-backdrop" role="presentation">
+        <section className={`call-dialog is-${callMode}`} aria-label={callTitle}>
+          <header className="call-header">
+            <div>
+              <p className="eyebrow">GreenTalk Call</p>
+              <h2>{callTitle}</h2>
+              <span>{display.name}</span>
+            </div>
+            <button className="icon-button" type="button" onClick={closeCall} aria-label="닫기">
+              <X size={20} />
+            </button>
+          </header>
+
+          {isVideoCall ? (
+            <div className="video-call-stage">
+              <div className="video-tile is-main">
+                {isCameraOff ? (
+                  <>
+                    {renderRoomAvatar(callRoom, 'call-avatar')}
+                    <strong>{display.name}</strong>
+                  </>
+                ) : (
+                  <>
+                    <Video size={38} />
+                    <strong>{display.name}</strong>
+                  </>
+                )}
+              </div>
+              <div className="video-tile is-self">
+                {isCameraOff ? (
+                  <VideoOff size={24} />
+                ) : (
+                  renderUserAvatar(
+                    authSession?.nickname ?? '나',
+                    authSession?.photoURL ?? '',
+                    'call-self-avatar',
+                  )
+                )}
+                <span>나</span>
+              </div>
+            </div>
+          ) : (
+            <div className="voice-call-stage">
+              {renderRoomAvatar(callRoom, 'call-avatar')}
+              <strong>{display.name}</strong>
+              <span>음성 채팅</span>
+            </div>
+          )}
+
+          <div className="call-controls">
+            <button
+              className={isMicMuted ? 'is-off' : ''}
+              type="button"
+              onClick={() => setIsMicMuted((current) => !current)}
+              aria-label={isMicMuted ? '마이크 켜기' : '마이크 끄기'}
+              title={isMicMuted ? '마이크 켜기' : '마이크 끄기'}
+            >
+              {isMicMuted ? <MicOff size={20} /> : <Mic size={20} />}
+              <span>{isMicMuted ? '음소거' : '마이크'}</span>
+            </button>
+            {isVideoCall && (
+              <button
+                className={isCameraOff ? 'is-off' : ''}
+                type="button"
+                onClick={() => setIsCameraOff((current) => !current)}
+                aria-label={isCameraOff ? '카메라 켜기' : '카메라 끄기'}
+                title={isCameraOff ? '카메라 켜기' : '카메라 끄기'}
+              >
+                {isCameraOff ? <VideoOff size={20} /> : <Video size={20} />}
+                <span>{isCameraOff ? '카메라 꺼짐' : '카메라'}</span>
+              </button>
+            )}
+            <button className="is-danger" type="button" onClick={closeCall}>
+              <PhoneOff size={20} />
+              <span>종료</span>
+            </button>
+          </div>
+        </section>
+      </div>
+    )
+  }
+
+  const activeRoomDisplay = getRoomDisplay(activeRoom)
 
   return (
     <main
@@ -2413,24 +2929,28 @@ function App() {
 
         <div className="room-list">
           {filteredRooms.length > 0 ? (
-            filteredRooms.map((room) => (
-              <button
-                className={`room-row ${room.id === activeRoomId ? 'is-active' : ''}`}
-                key={room.id}
-                type="button"
-                onClick={() => handleSelectRoom(room.id)}
-              >
-                {renderRoomAvatar(room)}
-                <span className="room-copy">
-                  <span className="room-name">
-                    {room.name}
-                    <small>{room.members}</small>
+            filteredRooms.map((room) => {
+              const display = getRoomDisplay(room)
+
+              return (
+                <button
+                  className={`room-row ${room.id === activeRoomId ? 'is-active' : ''}`}
+                  key={room.id}
+                  type="button"
+                  onClick={() => handleSelectRoom(room.id)}
+                >
+                  {renderRoomAvatar(room)}
+                  <span className="room-copy">
+                    <span className="room-name">
+                      {display.name}
+                      <small>{room.members}</small>
+                    </span>
+                    <span className="room-subtitle">{display.subtitle}</span>
                   </span>
-                  <span className="room-subtitle">{room.subtitle}</span>
-                </span>
-                {room.unread > 0 && <span className="unread-count">{room.unread}</span>}
-              </button>
-            ))
+                  {room.unread > 0 && <span className="unread-count">{room.unread}</span>}
+                </button>
+              )
+            })
           ) : (
             <div className="room-empty">
               <MessageCircle size={28} />
@@ -2452,32 +2972,31 @@ function App() {
         </div>
         <div className="mobile-page-list">
           <button className="mobile-page-row" type="button" onClick={openSettings}>
-            <span
-              className="avatar"
-              style={{ backgroundColor: authSession.photoURL ? '#12342d' : '#06c755' }}
-            >
-              {authSession.nickname.slice(0, 1)}
-            </span>
+            {renderUserAvatar(authSession.nickname, authSession.photoURL, 'avatar')}
             <span className="mobile-page-copy">
               <strong>{authSession.nickname}</strong>
               <small>내 프로필</small>
             </span>
           </button>
           {mobileDirectRooms.length > 0 ? (
-            mobileDirectRooms.map((room) => (
-              <button
-                className="mobile-page-row"
-                key={room.id}
-                type="button"
-                onClick={() => handleSelectRoom(room.id)}
-              >
-                {renderRoomAvatar(room)}
-                <span className="mobile-page-copy">
-                  <strong>{room.name}</strong>
-                  <small>{room.status}</small>
-                </span>
-              </button>
-            ))
+            mobileDirectRooms.map((room) => {
+              const display = getRoomDisplay(room)
+
+              return (
+                <button
+                  className="mobile-page-row"
+                  key={room.id}
+                  type="button"
+                  onClick={() => handleSelectRoom(room.id)}
+                >
+                  {renderRoomAvatar(room)}
+                  <span className="mobile-page-copy">
+                    <strong>{display.name}</strong>
+                    <small>{room.status}</small>
+                  </span>
+                </button>
+              )
+            })
           ) : (
             <div className="mobile-page-empty">
               <UserRound size={28} />
@@ -2515,20 +3034,43 @@ function App() {
         </div>
         <div className="mobile-page-list">
           {chatRooms.length > 0 ? (
-            chatRooms.map((room) => (
-              <button
-                className="mobile-page-row"
-                key={room.id}
-                type="button"
-                onClick={() => handleSelectRoom(room.id)}
-              >
-                {renderRoomAvatar(room)}
-                <span className="mobile-page-copy">
-                  <strong>{room.name}</strong>
-                  <small>{room.status}</small>
-                </span>
-              </button>
-            ))
+            chatRooms.map((room) => {
+              const display = getRoomDisplay(room)
+
+              return (
+                <div className="mobile-call-row" key={room.id}>
+                  <button
+                    className="mobile-call-main"
+                    type="button"
+                    onClick={() => handleSelectRoom(room.id)}
+                  >
+                    {renderRoomAvatar(room)}
+                    <span className="mobile-page-copy">
+                      <strong>{display.name}</strong>
+                      <small>{room.status}</small>
+                    </span>
+                  </button>
+                  <div className="mobile-call-actions">
+                    <button
+                      type="button"
+                      onClick={() => openCall('voice', room.id)}
+                      aria-label={`${display.name} 음성 채팅`}
+                      title="음성 채팅"
+                    >
+                      <Phone size={18} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openCall('video', room.id)}
+                      aria-label={`${display.name} 영상통화`}
+                      title="영상통화"
+                    >
+                      <Video size={18} />
+                    </button>
+                  </div>
+                </div>
+              )
+            })
           ) : (
             <div className="mobile-page-empty">
               <Phone size={28} />
@@ -2540,7 +3082,7 @@ function App() {
 
       <section
         className={`conversation-panel ${isDraggingFile ? 'is-dragging-file' : ''}`}
-        aria-label={activeRoom ? `${activeRoom.name} 대화` : '대화'}
+        aria-label={activeRoom ? `${activeRoomDisplay.name} 대화` : '대화'}
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -2565,7 +3107,7 @@ function App() {
             </button>
             {renderRoomAvatar(activeRoom, 'avatar large')}
             <div>
-              <h2>{activeRoom?.name ?? '채팅방 없음'}</h2>
+              <h2>{activeRoom ? activeRoomDisplay.name : '채팅방 없음'}</h2>
               <p>
                 {activeRoom
                   ? `${activeRoom.members} · ${activeRoom.status}`
@@ -2578,6 +3120,7 @@ function App() {
             <button
               className="icon-button"
               type="button"
+              onClick={() => openCall('voice')}
               aria-label="음성 통화"
               title="음성 통화"
               disabled={!activeRoom}
@@ -2587,6 +3130,7 @@ function App() {
             <button
               className="icon-button"
               type="button"
+              onClick={() => openCall('video')}
               aria-label="영상 통화"
               title="영상 통화"
               disabled={!activeRoom}
@@ -2596,8 +3140,9 @@ function App() {
             <button
               className="icon-button"
               type="button"
-              aria-label="대화 정보"
-              title="대화 정보"
+              onClick={() => openRoomSettings()}
+              aria-label="톡방 설정"
+              title="톡방 설정"
               disabled={!activeRoom}
             >
               <Info size={19} />
@@ -2615,15 +3160,17 @@ function App() {
           ) : visibleMessages.length > 0 ? (
             visibleMessages.map((message) => {
               const readCount = readBadgeByMessageId[message.id] ?? 0
+              const authorProfile =
+                userProfileById[message.authorId] ??
+                activeRoom?.participantProfiles[message.authorId]
 
               return (
                 <article
                   className={`message-row ${message.isMine ? 'is-mine' : ''}`}
                   key={message.id}
                 >
-                  {!message.isMine && (
-                    <span className="avatar small">{message.author.slice(0, 1)}</span>
-                  )}
+                  {!message.isMine &&
+                    renderUserAvatar(message.author, authorProfile?.photoURL ?? '')}
                   <div className="message-stack">
                     {!message.isMine && <span className="message-author">{message.author}</span>}
                     <div className="bubble-line">
@@ -2735,7 +3282,7 @@ function App() {
               !activeRoom
                 ? '채팅방을 선택해주세요.'
                 : canSendMessage
-                  ? `${activeRoom.name}에 메시지 보내기`
+                  ? `${activeRoomDisplay.name}에 메시지 보내기`
                   : connectionState === 'error'
                     ? '연결 상태를 확인해주세요.'
                     : '차단된 계정은 메시지를 보낼 수 없습니다.'
@@ -2756,19 +3303,38 @@ function App() {
 
       <aside className="detail-panel" aria-label="대화 상세 정보">
         <div className="detail-header">
-          <button className="icon-button" type="button" aria-label="더보기" title="더보기">
+          <button
+            className="icon-button"
+            type="button"
+            onClick={() => openRoomSettings()}
+            aria-label="톡방 설정"
+            title="톡방 설정"
+            disabled={!activeRoom}
+          >
             <MoreHorizontal size={20} />
           </button>
         </div>
         <div className="profile-card">
           {renderRoomAvatar(activeRoom, 'profile-avatar')}
-          <h2>{activeRoom?.name ?? '채팅방 없음'}</h2>
-          <p>{activeRoom?.subtitle ?? '채팅방 정보가 여기에 표시됩니다.'}</p>
+          <h2>{activeRoom ? activeRoomDisplay.name : '채팅방 없음'}</h2>
+          <p>{activeRoom ? activeRoomDisplay.subtitle : '채팅방 정보가 여기에 표시됩니다.'}</p>
           <div className="profile-actions">
-            <button type="button" aria-label="통화" title="통화" disabled={!activeRoom}>
+            <button
+              type="button"
+              onClick={() => openCall('voice')}
+              aria-label="음성 채팅"
+              title="음성 채팅"
+              disabled={!activeRoom}
+            >
               <Phone size={18} />
             </button>
-            <button type="button" aria-label="영상" title="영상" disabled={!activeRoom}>
+            <button
+              type="button"
+              onClick={() => openCall('video')}
+              aria-label="영상통화"
+              title="영상통화"
+              disabled={!activeRoom}
+            >
               <Video size={18} />
             </button>
             <button type="button" aria-label="검색" title="검색" disabled={!activeRoom}>
@@ -2840,6 +3406,9 @@ function App() {
         accept="image/*"
         onChange={handleRoomImageInputChange}
       />
+
+      {renderRoomSettingsDialog()}
+      {renderCallDialog()}
 
       {isSettingsOpen && (
         <div className="settings-backdrop" role="presentation">

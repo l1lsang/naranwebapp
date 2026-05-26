@@ -180,7 +180,8 @@ service cloud.firestore {
     }
 
     match /rooms/{roomId} {
-      allow list: if signedIn();
+      allow list: if signedIn()
+        && (isAdmin() || hasParticipant(resource.data.participantIds));
 
       allow get: if signedIn()
         && (isAdmin() || hasParticipant(resource.data.participantIds));
