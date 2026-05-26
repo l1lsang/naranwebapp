@@ -4,6 +4,9 @@ import {
   CheckCheck,
   Image as ImageIcon,
   Info,
+  LockKeyhole,
+  LogOut,
+  Mail,
   MessageCircle,
   Mic,
   MoreHorizontal,
@@ -13,24 +16,45 @@ import {
   Search,
   Send,
   Settings,
+  ShieldCheck,
   Smile,
+  UserRound,
   Video,
 } from 'lucide-react'
-import { signInAnonymously } from 'firebase/auth'
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+  type User,
+} from 'firebase/auth'
 import {
   addDoc,
   collection,
+  doc,
+  getDoc,
   limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   type Timestamp,
 } from 'firebase/firestore'
 import { auth, db, isFirebaseConfigured } from './lib/firebase'
 import './App.css'
 
+type AuthMode = 'login' | 'signup' | 'reset'
 type ConnectionState = 'demo' | 'connecting' | 'live' | 'error'
+
+type AuthSession = {
+  uid: string
+  email: string
+  nickname: string
+  isDemo: boolean
+}
 
 type ChatRoom = {
   id: string
@@ -58,6 +82,10 @@ type StoredMessage = {
   authorName?: string
   text?: string
   createdAt?: Timestamp
+}
+
+type StoredUserProfile = {
+  nickname?: unknown
 }
 
 const rooms: ChatRoom[] = [
@@ -97,7 +125,7 @@ const demoMessages: Record<string, ChatMessage[]> = {
       roomId: 'crew',
       author: '민서',
       authorId: 'minseo',
-      text: '오늘은 채팅 MVP 먼저 붙이고, 로그인은 익명 인증으로 열어둘게요.',
+      text: '오늘은 채팅 MVP 먼저 붙이고, 이메일 로그인 흐름까지 연결해볼게요.',
       time: '18:02',
       isMine: false,
     },
@@ -106,7 +134,7 @@ const demoMessages: Record<string, ChatMessage[]> = {
       roomId: 'crew',
       author: '나',
       authorId: 'local-me',
-      text: '좋아요. LINE처럼 가볍고 빠르게 느껴지는 쪽으로 가죠.',
+      text: '좋아요. 가입할 때 닉네임과 동의 기록도 같이 남기죠.',
       time: '18:04',
       isMine: true,
     },
@@ -115,7 +143,7 @@ const demoMessages: Record<string, ChatMessage[]> = {
       roomId: 'crew',
       author: '지우',
       authorId: 'jiwoo',
-      text: 'Vercel에는 Vite 빌드 결과만 올리고, 메시지는 Firestore에서 실시간 구독하면 됩니다.',
+      text: 'Vercel에는 Vite 빌드 결과를 올리고, Auth/Firestore 키는 환경변수로 관리하면 됩니다.',
       time: '18:07',
       isMine: false,
     },
@@ -135,7 +163,7 @@ const demoMessages: Record<string, ChatMessage[]> = {
       roomId: 'design',
       author: '나',
       authorId: 'local-me',
-      text: '채팅방 목록과 대화 영역 밀도를 조금 높여볼게요.',
+      text: '로그인 화면도 채팅 앱처럼 단단하고 가볍게 맞춰볼게요.',
       time: '17:45',
       isMine: true,
     },
@@ -166,6 +194,11 @@ const makeLocalId = () =>
 
 const formatTime = (date = new Date()) => timeFormatter.format(date)
 
+const getFallbackNickname = (email: string) => {
+  const localPart = email.split('@')[0]?.trim()
+  return localPart || '친구'
+}
+
 const connectionCopy: Record<ConnectionState, string> = {
   demo: '로컬 데모',
   connecting: 'Firebase 연결 중',
@@ -173,7 +206,66 @@ const connectionCopy: Record<ConnectionState, string> = {
   error: 'Firebase 확인 필요',
 }
 
+const authModeCopy: Record<AuthMode, string> = {
+  login: '로그인',
+  signup: '회원가입',
+  reset: '비밀번호 찾기',
+}
+
+const getAuthErrorMessage = (error: unknown) => {
+  const code =
+    typeof error === 'object' && error && 'code' in error
+      ? String(error.code)
+      : ''
+
+  if (code.includes('auth/email-already-in-use')) {
+    return '이미 가입된 이메일입니다.'
+  }
+
+  if (code.includes('auth/invalid-credential') || code.includes('auth/user-not-found')) {
+    return '이메일 또는 비밀번호를 확인해주세요.'
+  }
+
+  if (code.includes('auth/weak-password')) {
+    return '비밀번호는 6자 이상으로 입력해주세요.'
+  }
+
+  if (code.includes('auth/invalid-email')) {
+    return '이메일 형식을 확인해주세요.'
+  }
+
+  return '요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.'
+}
+
+const buildSessionFromUser = async (user: User): Promise<AuthSession> => {
+  let nickname = user.displayName ?? ''
+
+  if (!nickname && db) {
+    const profileSnapshot = await getDoc(doc(db, 'users', user.uid))
+    const profile = profileSnapshot.data() as StoredUserProfile | undefined
+    nickname = typeof profile?.nickname === 'string' ? profile.nickname : ''
+  }
+
+  return {
+    uid: user.uid,
+    email: user.email ?? '',
+    nickname,
+    isDemo: false,
+  }
+}
+
 function App() {
+  const [authMode, setAuthMode] = useState<AuthMode>('login')
+  const [authReady, setAuthReady] = useState(!isFirebaseConfigured)
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null)
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authNickname, setAuthNickname] = useState('')
+  const [nicknameDraft, setNicknameDraft] = useState('')
+  const [thirdPartyConsent, setThirdPartyConsent] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const [authMessage, setAuthMessage] = useState('')
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false)
   const [activeRoomId, setActiveRoomId] = useState(rooms[0].id)
   const [draft, setDraft] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
@@ -204,17 +296,295 @@ function App() {
   }, [searchTerm])
 
   const visibleMessages = useMemo(() => {
-    if (isFirebaseConfigured && connectionState === 'live') {
+    if (isFirebaseConfigured && authSession && connectionState !== 'error') {
       return remoteMessages
     }
 
     return messagesByRoom[activeRoomId] ?? []
-  }, [activeRoomId, connectionState, messagesByRoom, remoteMessages])
+  }, [
+    activeRoomId,
+    authSession,
+    connectionState,
+    messagesByRoom,
+    remoteMessages,
+  ])
 
   const unreadTotal = useMemo(
     () => rooms.reduce((total, room) => total + room.unread, 0),
     [],
   )
+
+  useEffect(() => {
+    if (!isFirebaseConfigured || !auth) {
+      return
+    }
+
+    let cancelled = false
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setAuthSession(null)
+        setCurrentUserId('local-me')
+        setAuthReady(true)
+        return
+      }
+
+      try {
+        const session = await buildSessionFromUser(user)
+
+        if (cancelled) {
+          return
+        }
+
+        setAuthSession(session)
+        setCurrentUserId(session.uid)
+        setAuthReady(true)
+      } catch {
+        if (!cancelled) {
+          setAuthSession({
+            uid: user.uid,
+            email: user.email ?? '',
+            nickname: user.displayName ?? '',
+            isDemo: false,
+          })
+          setCurrentUserId(user.uid)
+          setAuthReady(true)
+        }
+      }
+    })
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!authSession || !isFirebaseConfigured || !db) {
+      return
+    }
+
+    const messagesQuery = query(
+      collection(db, 'rooms', activeRoomId, 'messages'),
+      orderBy('createdAt', 'asc'),
+      limit(80),
+    )
+
+    const unsubscribe = onSnapshot(
+      messagesQuery,
+      (snapshot) => {
+        const nextMessages = snapshot.docs
+          .map((messageDoc) => {
+            const data = messageDoc.data() as StoredMessage
+            const createdAt = data.createdAt?.toDate()
+            const authorId = data.authorId ?? 'unknown'
+            const text = typeof data.text === 'string' ? data.text : ''
+
+            return {
+              id: messageDoc.id,
+              roomId: data.roomId ?? activeRoomId,
+              author:
+                authorId === authSession.uid ? '나' : (data.authorName ?? '친구'),
+              authorId,
+              text,
+              time: createdAt ? formatTime(createdAt) : '방금',
+              isMine: authorId === authSession.uid,
+            }
+          })
+          .filter((message) => message.text.length > 0)
+
+        setRemoteMessages(nextMessages)
+        setConnectionState('live')
+      },
+      () => {
+        setConnectionState('error')
+        setRemoteMessages([])
+      },
+    )
+
+    return unsubscribe
+  }, [activeRoomId, authSession])
+
+  const completeDemoAuth = (email: string, nickname = getFallbackNickname(email)) => {
+    setAuthSession({
+      uid: 'local-me',
+      email,
+      nickname,
+      isDemo: true,
+    })
+    setCurrentUserId('local-me')
+    setConnectionState('demo')
+  }
+
+  const switchAuthMode = (nextMode: AuthMode) => {
+    setAuthMode(nextMode)
+    setAuthError('')
+    setAuthMessage('')
+  }
+
+  const saveUserProfile = async (
+    uid: string,
+    email: string,
+    nickname: string,
+    consentGranted?: boolean,
+  ) => {
+    if (!db) {
+      return
+    }
+
+    const profilePayload =
+      typeof consentGranted === 'boolean'
+        ? {
+            uid,
+            email,
+            nickname,
+            thirdPartyConsent: consentGranted,
+            thirdPartyConsentAt: serverTimestamp(),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          }
+        : {
+            uid,
+            email,
+            nickname,
+            updatedAt: serverTimestamp(),
+          }
+
+    await setDoc(doc(db, 'users', uid), profilePayload, { merge: true })
+  }
+
+  const handleAuthSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    const email = authEmail.trim()
+    const password = authPassword.trim()
+    const nickname = authNickname.trim()
+
+    setAuthError('')
+    setAuthMessage('')
+
+    if (!email) {
+      setAuthError('이메일을 입력해주세요.')
+      return
+    }
+
+    if (authMode !== 'reset' && password.length < 6) {
+      setAuthError('비밀번호는 6자 이상으로 입력해주세요.')
+      return
+    }
+
+    if (authMode === 'signup' && nickname.length < 2) {
+      setAuthError('닉네임은 2자 이상으로 입력해주세요.')
+      return
+    }
+
+    if (authMode === 'signup' && !thirdPartyConsent) {
+      setAuthError('개인정보 제3자 제공 동의가 필요합니다.')
+      return
+    }
+
+    setIsAuthSubmitting(true)
+
+    try {
+      if (authMode === 'reset') {
+        if (isFirebaseConfigured && auth) {
+          await sendPasswordResetEmail(auth, email)
+        }
+
+        setAuthMessage(
+          isFirebaseConfigured
+            ? '비밀번호 재설정 메일을 보냈습니다.'
+            : '데모 모드에서는 재설정 메일 발송 없이 흐름만 확인합니다.',
+        )
+        return
+      }
+
+      if (!isFirebaseConfigured || !auth) {
+        completeDemoAuth(email, authMode === 'signup' ? nickname : undefined)
+        return
+      }
+
+      if (authMode === 'signup') {
+        const { user } = await createUserWithEmailAndPassword(auth, email, password)
+        await updateProfile(user, { displayName: nickname })
+        await saveUserProfile(user.uid, email, nickname, true)
+
+        setAuthSession({
+          uid: user.uid,
+          email,
+          nickname,
+          isDemo: false,
+        })
+        setCurrentUserId(user.uid)
+        setConnectionState('connecting')
+        return
+      }
+
+      const { user } = await signInWithEmailAndPassword(auth, email, password)
+      const session = await buildSessionFromUser(user)
+
+      setAuthSession(session)
+      setCurrentUserId(session.uid)
+      setConnectionState('connecting')
+    } catch (error) {
+      setAuthError(getAuthErrorMessage(error))
+    } finally {
+      setIsAuthSubmitting(false)
+    }
+  }
+
+  const handleNicknameSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    const nickname = nicknameDraft.trim()
+
+    setAuthError('')
+    setAuthMessage('')
+
+    if (!authSession) {
+      return
+    }
+
+    if (nickname.length < 2) {
+      setAuthError('닉네임은 2자 이상으로 입력해주세요.')
+      return
+    }
+
+    setIsAuthSubmitting(true)
+
+    try {
+      if (authSession.isDemo || !isFirebaseConfigured || !auth?.currentUser) {
+        setAuthSession({ ...authSession, nickname })
+        return
+      }
+
+      await updateProfile(auth.currentUser, { displayName: nickname })
+      await saveUserProfile(authSession.uid, authSession.email, nickname)
+      setAuthSession({ ...authSession, nickname })
+      setConnectionState('connecting')
+    } catch (error) {
+      setAuthError(getAuthErrorMessage(error))
+    } finally {
+      setIsAuthSubmitting(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    setRemoteMessages([])
+    setAuthError('')
+    setAuthMessage('')
+    setDraft('')
+
+    if (isFirebaseConfigured && auth) {
+      await signOut(auth)
+      setConnectionState('connecting')
+      return
+    }
+
+    setAuthSession(null)
+    setCurrentUserId('local-me')
+    setConnectionState('demo')
+  }
 
   const handleSelectRoom = (roomId: string) => {
     setActiveRoomId(roomId)
@@ -224,74 +594,6 @@ function App() {
       setRemoteMessages([])
     }
   }
-
-  useEffect(() => {
-    if (!isFirebaseConfigured || !auth || !db) {
-      return
-    }
-
-    const firebaseAuth = auth
-    const firestore = db
-    let cancelled = false
-    let unsubscribe: () => void = () => {}
-
-    signInAnonymously(firebaseAuth)
-      .then(({ user }) => {
-        if (cancelled) {
-          return
-        }
-
-        setCurrentUserId(user.uid)
-
-        const messagesQuery = query(
-          collection(firestore, 'rooms', activeRoomId, 'messages'),
-          orderBy('createdAt', 'asc'),
-          limit(80),
-        )
-
-        unsubscribe = onSnapshot(
-          messagesQuery,
-          (snapshot) => {
-            const nextMessages = snapshot.docs
-              .map((messageDoc) => {
-                const data = messageDoc.data() as StoredMessage
-                const createdAt = data.createdAt?.toDate()
-                const authorId = data.authorId ?? 'unknown'
-                const text = typeof data.text === 'string' ? data.text : ''
-
-                return {
-                  id: messageDoc.id,
-                  roomId: data.roomId ?? activeRoomId,
-                  author: authorId === user.uid ? '나' : (data.authorName ?? '친구'),
-                  authorId,
-                  text,
-                  time: createdAt ? formatTime(createdAt) : '방금',
-                  isMine: authorId === user.uid,
-                }
-              })
-              .filter((message) => message.text.length > 0)
-
-            setRemoteMessages(nextMessages)
-            setConnectionState('live')
-          },
-          () => {
-            setConnectionState('error')
-            setRemoteMessages([])
-          },
-        )
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setConnectionState('error')
-          setRemoteMessages([])
-        }
-      })
-
-    return () => {
-      cancelled = true
-      unsubscribe()
-    }
-  }, [activeRoomId])
 
   const appendLocalMessage = (message: ChatMessage) => {
     setMessagesByRoom((currentMessages) => ({
@@ -305,7 +607,7 @@ function App() {
 
     const text = draft.trim()
 
-    if (!text) {
+    if (!text || !authSession) {
       return
     }
 
@@ -326,7 +628,7 @@ function App() {
         await addDoc(collection(db, 'rooms', activeRoomId, 'messages'), {
           roomId: activeRoomId,
           authorId: auth.currentUser.uid,
-          authorName: '친구',
+          authorName: authSession.nickname,
           text,
           createdAt: serverTimestamp(),
         })
@@ -337,6 +639,177 @@ function App() {
     }
 
     appendLocalMessage(localMessage)
+  }
+
+  if (!authReady) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card auth-loading" aria-live="polite">
+          <span className="brand-mark auth-brand">
+            <MessageCircle size={28} strokeWidth={2.4} />
+          </span>
+          <h1>GreenTalk</h1>
+          <p>로그인 상태를 확인하고 있습니다.</p>
+        </section>
+      </main>
+    )
+  }
+
+  if (!authSession) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-visual" aria-label="GreenTalk 미리보기">
+          <div className="auth-logo">
+            <MessageCircle size={32} strokeWidth={2.4} />
+          </div>
+          <div className="preview-phone">
+            <div className="preview-topbar">
+              <span />
+              <strong>GreenTalk</strong>
+              <span />
+            </div>
+            <div className="preview-bubbles">
+              <p>안녕하세요, 회의 자료 공유드려요.</p>
+              <p>확인했습니다. 채팅방에 고정할게요.</p>
+              <p>가입 동의 기록도 같이 저장됩니다.</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="auth-card" aria-label={authModeCopy[authMode]}>
+          <p className="eyebrow">GreenTalk</p>
+          <h1>{authModeCopy[authMode]}</h1>
+          <div className="auth-tabs" role="tablist" aria-label="인증 메뉴">
+            {(['login', 'signup', 'reset'] as AuthMode[]).map((mode) => (
+              <button
+                className={authMode === mode ? 'is-active' : ''}
+                key={mode}
+                type="button"
+                onClick={() => switchAuthMode(mode)}
+              >
+                {authModeCopy[mode]}
+              </button>
+            ))}
+          </div>
+
+          <form className="auth-form" onSubmit={handleAuthSubmit}>
+            {authMode === 'signup' && (
+              <label className="field">
+                <span>닉네임</span>
+                <div className="field-control">
+                  <UserRound size={18} />
+                  <input
+                    value={authNickname}
+                    onChange={(event) => setAuthNickname(event.target.value)}
+                    placeholder="채팅에서 표시될 이름"
+                    autoComplete="nickname"
+                  />
+                </div>
+              </label>
+            )}
+
+            <label className="field">
+              <span>이메일</span>
+              <div className="field-control">
+                <Mail size={18} />
+                <input
+                  type="email"
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  placeholder="name@example.com"
+                  autoComplete="email"
+                />
+              </div>
+            </label>
+
+            {authMode !== 'reset' && (
+              <label className="field">
+                <span>비밀번호</span>
+                <div className="field-control">
+                  <LockKeyhole size={18} />
+                  <input
+                    type="password"
+                    value={authPassword}
+                    onChange={(event) => setAuthPassword(event.target.value)}
+                    placeholder="6자 이상"
+                    autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
+                  />
+                </div>
+              </label>
+            )}
+
+            {authMode === 'signup' && (
+              <label className="consent-row">
+                <input
+                  type="checkbox"
+                  checked={thirdPartyConsent}
+                  onChange={(event) => setThirdPartyConsent(event.target.checked)}
+                />
+                <span>
+                  <strong>개인정보 제3자 제공에 동의합니다.</strong>
+                  Firebase Authentication, Cloud Firestore, Vercel에 이메일,
+                  닉네임, 서비스 이용 기록이 제공될 수 있습니다.
+                </span>
+              </label>
+            )}
+
+            {authError && (
+              <p className="form-message is-error" role="alert">
+                {authError}
+              </p>
+            )}
+            {authMessage && <p className="form-message is-success">{authMessage}</p>}
+
+            <button className="primary-button" type="submit" disabled={isAuthSubmitting}>
+              {isAuthSubmitting ? '처리 중' : authModeCopy[authMode]}
+            </button>
+
+            {!isFirebaseConfigured && (
+              <div className="demo-note">
+                <ShieldCheck size={17} />
+                <span>Firebase 환경변수가 없어 데모 모드로 진행됩니다.</span>
+              </div>
+            )}
+          </form>
+        </section>
+      </main>
+    )
+  }
+
+  if (!authSession.nickname) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card nickname-card" aria-label="닉네임 설정">
+          <span className="brand-mark auth-brand">
+            <UserRound size={27} />
+          </span>
+          <p className="eyebrow">GreenTalk</p>
+          <h1>닉네임 설정</h1>
+          <form className="auth-form" onSubmit={handleNicknameSubmit}>
+            <label className="field">
+              <span>닉네임</span>
+              <div className="field-control">
+                <UserRound size={18} />
+                <input
+                  value={nicknameDraft}
+                  onChange={(event) => setNicknameDraft(event.target.value)}
+                  placeholder="2자 이상 입력"
+                  autoComplete="nickname"
+                />
+              </div>
+            </label>
+            {authError && (
+              <p className="form-message is-error" role="alert">
+                {authError}
+              </p>
+            )}
+            <button className="primary-button" type="submit" disabled={isAuthSubmitting}>
+              {isAuthSubmitting ? '저장 중' : '저장'}
+            </button>
+          </form>
+        </section>
+      </main>
+    )
   }
 
   return (
@@ -357,6 +830,10 @@ function App() {
             <Settings size={21} />
           </button>
         </nav>
+        <div className="rail-spacer" />
+        <button className="rail-button" type="button" onClick={handleLogout} aria-label="로그아웃" title="로그아웃">
+          <LogOut size={21} />
+        </button>
       </aside>
 
       <section className="room-panel" aria-label="채팅방 목록">
@@ -364,6 +841,7 @@ function App() {
           <div>
             <p className="eyebrow">GreenTalk</p>
             <h1>채팅</h1>
+            <p className="signed-user">{authSession.nickname}</p>
           </div>
           <button className="icon-button" type="button" aria-label="채팅방 추가" title="채팅방 추가">
             <Plus size={20} />
@@ -533,11 +1011,11 @@ function App() {
           <h3>고정된 항목</h3>
           <button className="pinned-item" type="button">
             <CheckCheck size={18} />
-            <span>Firestore 실시간 메시지 컬렉션</span>
+            <span>이메일 로그인 및 닉네임 프로필</span>
           </button>
           <button className="pinned-item" type="button">
             <CheckCheck size={18} />
-            <span>Vercel 환경변수 등록</span>
+            <span>개인정보 제3자 제공 동의 기록</span>
           </button>
         </div>
       </aside>

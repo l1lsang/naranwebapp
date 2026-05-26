@@ -2,6 +2,26 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly([
+          'uid',
+          'email',
+          'nickname',
+          'thirdPartyConsent',
+          'thirdPartyConsentAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && request.resource.data.uid == userId
+        && request.resource.data.nickname is string
+        && request.resource.data.nickname.size() >= 2
+        && request.resource.data.nickname.size() <= 24;
+      allow delete: if false;
+    }
+
     match /rooms/{roomId}/messages/{messageId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null
