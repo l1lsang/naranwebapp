@@ -621,6 +621,7 @@ function App() {
   const pendingLocalCandidatesRef = useRef<RTCIceCandidateInit[]>([])
   const pendingRemoteCandidatesRef = useRef<RTCIceCandidateInit[]>([])
   const isCallSignalReadyRef = useRef(false)
+  const privacyKeysRef = useRef<Set<string>>(new Set())
 
   const isAdmin = authSession?.role === 'admin'
   const canSendMessage =
@@ -789,6 +790,8 @@ function App() {
       return
     }
 
+    const pressedPrivacyKeys = privacyKeysRef.current
+
     const isMobileDevice = () =>
       window.matchMedia('(hover: none) and (pointer: coarse)').matches ||
       /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
@@ -797,24 +800,101 @@ function App() {
       setPrivacyShieldReason(reason)
     }
 
-    const handleCaptureKey = (event: KeyboardEvent) => {
+    const normalizeCaptureKey = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
-      const isPrintScreen = key === 'printscreen'
-      const isPrintCommand = (event.ctrlKey || event.metaKey) && key === 'p'
-      const isMacCaptureCommand =
-        event.metaKey && event.shiftKey && ['3', '4', '5', 's'].includes(key)
-      const isSnipCommand = event.shiftKey && (event.metaKey || event.ctrlKey) && key === 's'
 
-      if (!isPrintScreen && !isPrintCommand && !isMacCaptureCommand && !isSnipCommand) {
-        return
+      if (
+        key === 'meta' ||
+        key === 'os' ||
+        key === 'win' ||
+        event.code === 'MetaLeft' ||
+        event.code === 'MetaRight'
+      ) {
+        return 'meta'
       }
 
-      event.preventDefault()
-      showShield(isMobileDevice() ? '모바일 캡처 보호 화면' : '캡처 보호 화면')
+      if (key === 'shift' || event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
+        return 'shift'
+      }
+
+      if (
+        key === 'control' ||
+        event.code === 'ControlLeft' ||
+        event.code === 'ControlRight'
+      ) {
+        return 'control'
+      }
+
+      if (key === 's' || event.code === 'KeyS') {
+        return 's'
+      }
+
+      if (key === 'p' || event.code === 'KeyP') {
+        return 'p'
+      }
+
+      if (['3', '4', '5'].includes(key)) {
+        return key
+      }
+
+      if (['Digit3', 'Digit4', 'Digit5'].includes(event.code)) {
+        return event.code.replace('Digit', '')
+      }
+
+      if (key === 'printscreen' || event.code === 'PrintScreen') {
+        return 'printscreen'
+      }
+
+      return key
+    }
+
+    const showCaptureShield = (event?: KeyboardEvent, reason = '캡처 보호 화면') => {
+      event?.preventDefault()
+      event?.stopPropagation()
+      showShield(isMobileDevice() ? '모바일 캡처 보호 화면' : reason)
       void navigator.clipboard?.writeText?.('').catch(() => undefined)
     }
 
+    const shouldBlockCaptureKey = (event: KeyboardEvent, key: string) => {
+      const hasMeta = pressedPrivacyKeys.has('meta') || event.metaKey
+      const hasShift = pressedPrivacyKeys.has('shift') || event.shiftKey
+      const hasControl = pressedPrivacyKeys.has('control') || event.ctrlKey
+      const isPrintScreen = key === 'printscreen'
+      const isPrintCommand = (hasControl || hasMeta) && key === 'p'
+      const isDesktopCaptureChord = hasMeta && hasShift
+      const isMacCaptureCommand = hasMeta && hasShift && ['3', '4', '5', 's'].includes(key)
+      const isSnipCommand = hasShift && (hasMeta || hasControl) && key === 's'
+
+      return (
+        isPrintScreen ||
+        isPrintCommand ||
+        isDesktopCaptureChord ||
+        isMacCaptureCommand ||
+        isSnipCommand
+      )
+    }
+
+    const handleCaptureKeyDown = (event: KeyboardEvent) => {
+      const key = normalizeCaptureKey(event)
+      pressedPrivacyKeys.add(key)
+
+      if (shouldBlockCaptureKey(event, key)) {
+        showCaptureShield(event)
+      }
+    }
+
+    const handleCaptureKeyUp = (event: KeyboardEvent) => {
+      const key = normalizeCaptureKey(event)
+
+      if (shouldBlockCaptureKey(event, key)) {
+        showCaptureShield(event)
+      }
+
+      pressedPrivacyKeys.delete(key)
+    }
+
     const handleFocusLoss = () => {
+      pressedPrivacyKeys.clear()
       showShield(isMobileDevice() ? '모바일 캡처 보호 화면' : '캡처 보호 화면')
     }
 
@@ -825,18 +905,19 @@ function App() {
     }
 
     const handlePrint = () => {
-      showShield('프린트 보호 화면')
+      showCaptureShield(undefined, '프린트 보호 화면')
     }
 
-    window.addEventListener('keydown', handleCaptureKey, true)
-    window.addEventListener('keyup', handleCaptureKey, true)
+    window.addEventListener('keydown', handleCaptureKeyDown, true)
+    window.addEventListener('keyup', handleCaptureKeyUp, true)
     window.addEventListener('blur', handleFocusLoss)
     window.addEventListener('beforeprint', handlePrint)
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
-      window.removeEventListener('keydown', handleCaptureKey, true)
-      window.removeEventListener('keyup', handleCaptureKey, true)
+      pressedPrivacyKeys.clear()
+      window.removeEventListener('keydown', handleCaptureKeyDown, true)
+      window.removeEventListener('keyup', handleCaptureKeyUp, true)
       window.removeEventListener('blur', handleFocusLoss)
       window.removeEventListener('beforeprint', handlePrint)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
