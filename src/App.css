@@ -1513,6 +1513,10 @@ h3 {
   }
 
   .app-shell.is-mobile-chat-open {
+    height: 100vh;
+    max-height: 100vh;
+    min-height: 100vh;
+    overflow: hidden;
     padding-bottom: 0;
   }
 
@@ -1539,7 +1543,9 @@ h3 {
 
   .app-shell.is-mobile-tab-chats.is-mobile-chat-open .conversation-panel {
     display: grid;
-    min-height: 100svh;
+    height: 100%;
+    max-height: 100vh;
+    min-height: 0;
   }
 
   .app-shell.is-mobile-tab-friends .mobile-tab-page.is-friends,
