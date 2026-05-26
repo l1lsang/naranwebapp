@@ -62,6 +62,47 @@ service cloud.firestore {
       );
     }
 
+    function validSelfProfileUpdate(userId) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'uid',
+        'email',
+        'nickname',
+        'photoURL',
+        'photoPath',
+        'updatedAt'
+      ])
+      && (
+        !request.resource.data.keys().hasAny(['uid'])
+        || request.resource.data.uid == userId
+      )
+      && (
+        !request.resource.data.keys().hasAny(['nickname'])
+        || (
+          request.resource.data.nickname is string
+          && request.resource.data.nickname.size() >= 2
+          && request.resource.data.nickname.size() <= 24
+        )
+      )
+      && (
+        !request.resource.data.keys().hasAny(['photoURL'])
+        || (
+          request.resource.data.photoURL is string
+          && request.resource.data.photoURL.size() <= 2048
+        )
+      )
+      && (
+        !request.resource.data.keys().hasAny(['photoPath'])
+        || (
+          request.resource.data.photoPath is string
+          && request.resource.data.photoPath.matches('profileImages/' + userId + '/.*')
+        )
+      )
+      && (
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['updatedAt'])
+        || request.resource.data.updatedAt == request.time
+      );
+    }
+
     function validReadReceipt(userId) {
       return request.resource.data.keys().hasOnly([
         'userId',
@@ -122,9 +163,7 @@ service cloud.firestore {
         && (
           (
             request.auth.uid == userId
-            && validUserProfile(userId)
-            && request.resource.data.role == resource.data.role
-            && request.resource.data.status == resource.data.status
+            && validSelfProfileUpdate(userId)
           )
           || (
             isAdmin()

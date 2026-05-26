@@ -1060,7 +1060,6 @@ function App() {
       const photoURL = await getDownloadURL(snapshot.ref)
       const previousPhotoPath = authSession.photoPath
 
-      await updateProfile(auth.currentUser, { photoURL })
       await setDoc(
         doc(db, 'users', authSession.uid),
         {
@@ -1070,7 +1069,11 @@ function App() {
         },
         { merge: true },
       )
-      setAuthSession({ ...authSession, photoURL, photoPath: path })
+      await updateProfile(auth.currentUser, { photoURL }).catch(() => undefined)
+      setAuthSession((currentSession) =>
+        currentSession ? { ...currentSession, photoURL, photoPath: path } : currentSession,
+      )
+      setSettingsError('')
       setSettingsNotice('프로필 사진을 변경했습니다.')
       setProfileImageProgress(100)
 

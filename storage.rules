@@ -6,28 +6,35 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function validUpload(maxBytes) {
+      return request.resource != null
+        && request.resource.size > 0
+        && request.resource.size <= maxBytes;
+    }
+
+    function validImageUpload(maxBytes) {
+      return validUpload(maxBytes)
+        && request.resource.contentType.matches('image/.*');
+    }
+
     match /chatFiles/{roomId}/{userId}/{fileName} {
       allow read: if signedIn();
 
-      allow write: if signedIn()
-        && request.auth.uid == userId
-        && request.resource != null
-        && request.resource.size > 0
-        && request.resource.size <= 20 * 1024 * 1024;
+      allow write: if isOwner(userId)
+        && validUpload(20 * 1024 * 1024);
     }
 
-    match /profileImages/{userId}/{fileName} {
+    match /profileImages/{userId}/{fileName=**} {
       allow read: if signedIn();
 
-      allow create, update: if signedIn()
-        && request.auth.uid == userId
-        && request.resource != null
-        && request.resource.size > 0
-        && request.resource.size <= 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
+      allow create, update: if isOwner(userId)
+        && validImageUpload(5 * 1024 * 1024);
 
-      allow delete: if signedIn()
-        && request.auth.uid == userId;
+      allow delete: if isOwner(userId);
     }
   }
 }
