@@ -1697,6 +1697,31 @@ h3 {
   padding: 18px;
 }
 
+.privacy-shield {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  background: #000000;
+  display: grid;
+  place-items: end center;
+  padding: 24px;
+}
+
+.privacy-shield button {
+  min-width: 112px;
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.privacy-shield button:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
 .call-dialog {
   width: min(680px, 100%);
   border-radius: 8px;
@@ -2249,5 +2274,20 @@ h3 {
 
   .app-shell.is-mobile-chat-open .mobile-tab-bar {
     display: none;
+  }
+}
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 2147483647;
+    background: #000000;
+    visibility: visible !important;
   }
 }

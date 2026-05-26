@@ -568,6 +568,7 @@ function App() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadNotice, setUploadNotice] = useState('')
   const [isDraggingFile, setIsDraggingFile] = useState(false)
+  const [privacyShieldReason, setPrivacyShieldReason] = useState('')
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [settingsNickname, setSettingsNickname] = useState('')
   const [settingsCurrentPassword, setSettingsCurrentPassword] = useState('')
@@ -784,6 +785,65 @@ function App() {
   }, [authSession, readReceipts, visibleMessages])
 
   useEffect(() => {
+    if (!authSession) {
+      return
+    }
+
+    const isMobileDevice = () =>
+      window.matchMedia('(hover: none) and (pointer: coarse)').matches ||
+      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+
+    const showShield = (reason: string) => {
+      setPrivacyShieldReason(reason)
+    }
+
+    const handleCaptureKey = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase()
+      const isPrintScreen = key === 'printscreen'
+      const isPrintCommand = (event.ctrlKey || event.metaKey) && key === 'p'
+      const isMacCaptureCommand =
+        event.metaKey && event.shiftKey && ['3', '4', '5', 's'].includes(key)
+      const isSnipCommand = event.shiftKey && (event.metaKey || event.ctrlKey) && key === 's'
+
+      if (!isPrintScreen && !isPrintCommand && !isMacCaptureCommand && !isSnipCommand) {
+        return
+      }
+
+      event.preventDefault()
+      showShield(isMobileDevice() ? '모바일 캡처 보호 화면' : '캡처 보호 화면')
+      void navigator.clipboard?.writeText?.('').catch(() => undefined)
+    }
+
+    const handleFocusLoss = () => {
+      showShield(isMobileDevice() ? '모바일 캡처 보호 화면' : '캡처 보호 화면')
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') {
+        handleFocusLoss()
+      }
+    }
+
+    const handlePrint = () => {
+      showShield('프린트 보호 화면')
+    }
+
+    window.addEventListener('keydown', handleCaptureKey, true)
+    window.addEventListener('keyup', handleCaptureKey, true)
+    window.addEventListener('blur', handleFocusLoss)
+    window.addEventListener('beforeprint', handlePrint)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('keydown', handleCaptureKey, true)
+      window.removeEventListener('keyup', handleCaptureKey, true)
+      window.removeEventListener('blur', handleFocusLoss)
+      window.removeEventListener('beforeprint', handlePrint)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [authSession])
+
+  useEffect(() => {
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = localStream
     }
@@ -869,6 +929,7 @@ function App() {
         setRetentionRoomId('')
         setAppearanceRoomId('')
         setIsRoomSettingsOpen(false)
+        setPrivacyShieldReason('')
         setCallMode(null)
         setCallRoomId('')
         setAuthReady(true)
@@ -1609,6 +1670,7 @@ function App() {
     setRetentionRoomId('')
     setAppearanceRoomId('')
     setIsRoomSettingsOpen(false)
+    setPrivacyShieldReason('')
     setCallMode(null)
     setCallRoomId('')
 
@@ -3427,6 +3489,20 @@ function App() {
     )
   }
 
+  const renderPrivacyShield = () => {
+    if (!privacyShieldReason) {
+      return null
+    }
+
+    return (
+      <div className="privacy-shield" role="dialog" aria-modal="true" aria-label={privacyShieldReason}>
+        <button type="button" onClick={() => setPrivacyShieldReason('')}>
+          계속하기
+        </button>
+      </div>
+    )
+  }
+
   const activeRoomDisplay = getRoomDisplay(activeRoom)
 
   return (
@@ -4065,6 +4141,7 @@ function App() {
       {renderRoomSettingsDialog()}
       {renderIncomingCallDialog()}
       {renderCallDialog()}
+      {renderPrivacyShield()}
 
       {isSettingsOpen && (
         <div className="settings-backdrop" role="presentation">
