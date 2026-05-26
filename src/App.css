@@ -1586,8 +1586,11 @@ h3 {
 
   .app-shell.is-mobile-chat-open {
     height: 100vh;
+    height: 100dvh;
     max-height: 100vh;
+    max-height: 100dvh;
     min-height: 100vh;
+    min-height: 100dvh;
     overflow: hidden;
     padding-bottom: 0;
   }
@@ -1617,6 +1620,7 @@ h3 {
     display: grid;
     height: 100%;
     max-height: 100vh;
+    max-height: 100dvh;
     min-height: 0;
   }
 
@@ -1666,8 +1670,11 @@ h3 {
   }
 
   .chat-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
     gap: 8px;
-    padding: 10px 14px;
+    min-height: 0;
+    padding: 8px 10px;
   }
 
   .mobile-back-button {
@@ -1685,20 +1692,29 @@ h3 {
   }
 
   .chat-title {
+    order: 1;
+    flex: 1 1 calc(100% - 48px);
     gap: 9px;
   }
 
   .chat-title .avatar.large {
-    width: 42px;
-    height: 42px;
+    width: 38px;
+    height: 38px;
   }
 
   .chat-retention-control {
-    width: 126px;
+    order: 3;
+    width: 100%;
+    min-height: 34px;
   }
 
   .chat-retention-control button {
     font-size: 11px;
+  }
+
+  .chat-actions {
+    order: 2;
+    flex: 0 0 auto;
   }
 
   .chat-actions .icon-button:nth-child(1),
