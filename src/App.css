@@ -668,12 +668,31 @@ h3 {
 }
 
 .conversation-panel {
+  position: relative;
   min-width: 0;
   background:
     linear-gradient(180deg, rgba(229, 248, 236, 0.58), rgba(255, 255, 255, 0) 260px),
     #f8faf9;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 10px;
+  z-index: 4;
+  border: 2px dashed rgba(6, 199, 85, 0.74);
+  border-radius: 8px;
+  color: #0d6d36;
+  background: rgba(242, 255, 247, 0.86);
+  backdrop-filter: blur(8px);
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  pointer-events: none;
+  font-size: 14px;
+  font-weight: 900;
 }
 
 .mobile-room-tabs {
@@ -779,6 +798,73 @@ h3 {
   background: #8ff09f;
 }
 
+.attachment-card {
+  max-width: min(340px, 100%);
+  border-radius: 16px;
+  color: var(--ink);
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgba(18, 52, 45, 0.07);
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  text-decoration: none;
+  overflow: hidden;
+}
+
+.message-row.is-mine .attachment-card {
+  color: #072016;
+  background: #8ff09f;
+}
+
+.attachment-card.is-image {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+}
+
+.attachment-card.is-image img {
+  width: min(300px, 62vw);
+  max-height: 260px;
+  border-radius: 12px;
+  object-fit: cover;
+  display: block;
+}
+
+.attachment-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  color: var(--line-green);
+  background: #eef8f2;
+  display: grid;
+  place-items: center;
+}
+
+.attachment-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.attachment-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.attachment-copy small {
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .message-time {
   color: var(--muted);
   font-size: 11px;
@@ -811,6 +897,32 @@ h3 {
   font-weight: 700;
 }
 
+.upload-status {
+  border-top: 1px solid rgba(18, 52, 45, 0.08);
+  background: #ffffff;
+  color: var(--muted);
+  display: grid;
+  gap: 7px;
+  padding: 9px 18px 0;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.upload-meter {
+  height: 5px;
+  border-radius: 999px;
+  background: #edf3f0;
+  overflow: hidden;
+}
+
+.upload-meter span {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--line-green);
+  display: block;
+  transition: width 160ms ease;
+}
+
 .composer {
   min-height: 76px;
   border-top: 1px solid rgba(18, 52, 45, 0.08);
@@ -820,6 +932,16 @@ h3 {
   align-items: center;
   gap: 10px;
   padding: 12px 18px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
 }
 
 .composer-tools {

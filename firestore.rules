@@ -59,6 +59,37 @@ service cloud.firestore {
       && request.resource.data.updatedAt == request.time;
     }
 
+    function validMessageAttachment(roomId) {
+      return !request.resource.data.keys().hasAny(['attachment'])
+        || (
+          request.resource.data.attachment is map
+          && request.resource.data.attachment.keys().hasOnly([
+            'kind',
+            'name',
+            'url',
+            'path',
+            'contentType',
+            'size'
+          ])
+          && request.resource.data.attachment.kind in ['image', 'file']
+          && request.resource.data.attachment.name is string
+          && request.resource.data.attachment.name.size() > 0
+          && request.resource.data.attachment.name.size() <= 160
+          && request.resource.data.attachment.url is string
+          && request.resource.data.attachment.url.size() > 0
+          && request.resource.data.attachment.path is string
+          && request.resource.data.attachment.path.matches(
+            'chatFiles/' + roomId + '/' + request.auth.uid + '/.*'
+          )
+          && request.resource.data.attachment.contentType is string
+          && request.resource.data.attachment.contentType.size() > 0
+          && request.resource.data.attachment.contentType.size() <= 120
+          && request.resource.data.attachment.size is int
+          && request.resource.data.attachment.size > 0
+          && request.resource.data.attachment.size <= 20 * 1024 * 1024
+        );
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
 
@@ -131,12 +162,24 @@ service cloud.firestore {
 
         allow create: if signedIn()
           && (isAdmin() || isRoomParticipant(roomId))
+          && request.resource.data.keys().hasOnly([
+            'roomId',
+            'authorId',
+            'authorName',
+            'text',
+            'attachment',
+            'createdAt'
+          ])
           && request.resource.data.roomId == roomId
           && request.resource.data.authorId == request.auth.uid
+          && request.resource.data.authorName is string
+          && request.resource.data.authorName.size() > 0
+          && request.resource.data.authorName.size() <= 24
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 1000
-          && request.resource.data.createdAt == request.time;
+          && request.resource.data.createdAt == request.time
+          && validMessageAttachment(roomId);
 
         allow update, delete: if false;
       }

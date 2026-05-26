@@ -28,7 +28,7 @@ VITE_FIREBASE_APP_ID=
 
 관리자 계정은 Firebase 콘솔에서 해당 `users/{uid}` 문서의 `role`을 `"admin"`으로 바꿔서 지정합니다. 관리자만 유저 목록 조회, 유저 상태/권한 변경, 1:1 대화 시작, 단톡방 생성이 가능합니다.
 
-메시지는 `rooms/{roomId}/messages` 하위 컬렉션에 저장됩니다. 일반 유저는 본인이 `participantIds`에 포함된 방에서만 메시지를 보낼 수 있습니다.
+메시지는 `rooms/{roomId}/messages` 하위 컬렉션에 저장됩니다. 일반 유저는 본인이 `participantIds`에 포함된 방에서만 메시지를 보낼 수 있습니다. 사진과 파일 원본은 Firebase Storage의 `chatFiles/{roomId}/{uid}` 경로에 저장하고, 메시지 문서에는 다운로드 URL과 파일 메타데이터를 함께 저장합니다.
 
 읽음 상태는 `rooms/{roomId}/readReceipts/{uid}` 문서에 사용자별 마지막 읽은 메시지 ID로 저장됩니다. 클라이언트는 상대가 읽은 범위 안에서 내가 보낸 가장 최근 메시지 옆에 `읽음` 표시를 보여줍니다.
 

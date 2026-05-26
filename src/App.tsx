@@ -1,7 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type FormEvent,
+} from 'react'
 import {
   Bell,
   CheckCheck,
+  Download,
+  FileText,
   Image as ImageIcon,
   Info,
   LockKeyhole,
@@ -18,6 +28,7 @@ import {
   Settings,
   ShieldCheck,
   Smile,
+  UploadCloud,
   UserRound,
   Video,
 } from 'lucide-react'
@@ -44,7 +55,13 @@ import {
   where,
   type Timestamp,
 } from 'firebase/firestore'
-import { auth, db, isFirebaseConfigured } from './lib/firebase'
+import {
+  getDownloadURL,
+  ref as storageRef,
+  uploadBytesResumable,
+  type UploadTaskSnapshot,
+} from 'firebase/storage'
+import { auth, db, isFirebaseConfigured, storage as fileStorage } from './lib/firebase'
 import './App.css'
 
 type AuthMode = 'login' | 'signup' | 'reset'
@@ -53,6 +70,7 @@ type UserRole = 'user' | 'admin'
 type UserStatus = 'active' | 'blocked'
 type AdminPanel = 'users' | 'direct' | 'group'
 type RoomType = 'group' | 'direct'
+type AttachmentKind = 'image' | 'file'
 
 type AuthSession = {
   uid: string
@@ -90,6 +108,16 @@ type ChatMessage = {
   text: string
   time: string
   isMine: boolean
+  attachment?: MessageAttachment
+}
+
+type MessageAttachment = {
+  kind: AttachmentKind
+  name: string
+  url: string
+  path: string
+  contentType: string
+  size: number
 }
 
 type ReadReceipt = {
@@ -102,6 +130,7 @@ type StoredMessage = {
   authorId?: string
   authorName?: string
   text?: string
+  attachment?: unknown
   createdAt?: Timestamp
 }
 
@@ -143,7 +172,38 @@ const statusCopy: Record<UserStatus, string> = {
   blocked: '차단',
 }
 
+const maxAttachmentBytes = 20 * 1024 * 1024
+
 const formatTime = (date = new Date()) => timeFormatter.format(date)
+
+const formatFileSize = (bytes: number) => {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+  }
+
+  if (bytes >= 1024) {
+    return `${Math.ceil(bytes / 1024)}KB`
+  }
+
+  return `${bytes}B`
+}
+
+const sanitizeStorageName = (fileName: string) =>
+  fileName
+    .trim()
+    .replace(/[\\/:*?"<>|#%{}[\]~]/g, '-')
+    .replace(/\s+/g, '-')
+    .slice(0, 120) || 'attachment'
+
+const createUploadPath = (roomId: string, userId: string, fileName: string) => {
+  const safeName = sanitizeStorageName(fileName)
+  const uniqueId =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+  return `chatFiles/${roomId}/${userId}/${uniqueId}-${safeName}`
+}
 
 const getFallbackNickname = (email: string) => {
   const localPart = email.split('@')[0]?.trim()
@@ -156,6 +216,33 @@ const normalizeStatus = (status: unknown): UserStatus =>
   status === 'blocked' ? 'blocked' : 'active'
 
 const getRoomAccent = (seed: number) => roomAccents[seed % roomAccents.length]
+
+const normalizeAttachment = (attachment: unknown): MessageAttachment | undefined => {
+  if (!attachment || typeof attachment !== 'object') {
+    return undefined
+  }
+
+  const data = attachment as Record<string, unknown>
+  const kind: AttachmentKind = data.kind === 'image' ? 'image' : 'file'
+  const name = typeof data.name === 'string' ? data.name : ''
+  const url = typeof data.url === 'string' ? data.url : ''
+  const path = typeof data.path === 'string' ? data.path : ''
+  const contentType = typeof data.contentType === 'string' ? data.contentType : ''
+  const size = typeof data.size === 'number' ? data.size : 0
+
+  if (!name || !url || !path) {
+    return undefined
+  }
+
+  return {
+    kind,
+    name,
+    url,
+    path,
+    contentType,
+    size,
+  }
+}
 
 const connectionCopy: Record<ConnectionState, string> = {
   connecting: 'Firebase 연결 중',
@@ -236,6 +323,10 @@ function App() {
   const [remoteMessages, setRemoteMessages] = useState<ChatMessage[]>([])
   const [readReceipts, setReadReceipts] = useState<ReadReceipt[]>([])
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadNotice, setUploadNotice] = useState('')
+  const [isDraggingFile, setIsDraggingFile] = useState(false)
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([])
   const [adminPanel, setAdminPanel] = useState<AdminPanel>('users')
   const [adminNotice, setAdminNotice] = useState('')
@@ -243,10 +334,16 @@ function App() {
   const [groupName, setGroupName] = useState('')
   const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([])
   const lastMarkedReadRef = useRef('')
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const imageInputRef = useRef<HTMLInputElement | null>(null)
+  const dragDepthRef = useRef(0)
 
   const isAdmin = authSession?.role === 'admin'
   const canSendMessage =
-    authSession?.status === 'active' && Boolean(activeRoomId) && connectionState !== 'error'
+    authSession?.status === 'active' &&
+    Boolean(activeRoomId) &&
+    connectionState !== 'error' &&
+    !isUploading
 
   const activeRoom = useMemo(
     () => chatRooms.find((room) => room.id === activeRoomId),
@@ -487,6 +584,7 @@ function App() {
             const createdAt = data.createdAt?.toDate()
             const authorId = data.authorId ?? 'unknown'
             const text = typeof data.text === 'string' ? data.text : ''
+            const attachment = normalizeAttachment(data.attachment)
 
             return {
               id: messageDoc.id,
@@ -497,9 +595,10 @@ function App() {
               text,
               time: createdAt ? formatTime(createdAt) : '방금',
               isMine: authorId === authSession.uid,
+              attachment,
             }
           })
-          .filter((message) => message.text.length > 0)
+          .filter((message) => message.text.length > 0 || message.attachment)
 
         setRemoteMessages(nextMessages)
         setConnectionState('live')
@@ -943,6 +1042,159 @@ function App() {
     }
   }
 
+  const uploadStorageFile = (
+    file: File,
+    path: string,
+    fileIndex: number,
+    fileCount: number,
+  ) =>
+    new Promise<UploadTaskSnapshot>((resolve, reject) => {
+      if (!fileStorage) {
+        reject(new Error('Firebase Storage is not configured.'))
+        return
+      }
+
+      const task = uploadBytesResumable(storageRef(fileStorage, path), file, {
+        contentType: file.type || 'application/octet-stream',
+        customMetadata: {
+          roomId: activeRoomId,
+          uploadedBy: authSession?.uid ?? '',
+        },
+      })
+
+      task.on(
+        'state_changed',
+        (snapshot) => {
+          const fileProgress =
+            snapshot.totalBytes > 0 ? snapshot.bytesTransferred / snapshot.totalBytes : 0
+          const totalProgress = Math.round(((fileIndex + fileProgress) / fileCount) * 100)
+
+          setUploadProgress(totalProgress)
+        },
+        reject,
+        () => resolve(task.snapshot),
+      )
+    })
+
+  const handleUploadFiles = async (files: File[]) => {
+    const selectedFiles = files.filter((file) => file.size > 0)
+
+    if (selectedFiles.length === 0) {
+      return
+    }
+
+    if (!authSession || !activeRoomId || !canSendMessage) {
+      setUploadNotice('현재 채팅방에는 파일을 보낼 수 없습니다.')
+      return
+    }
+
+    if (!db || !fileStorage || !auth?.currentUser) {
+      setConnectionState('error')
+      setUploadNotice('Firebase Storage 연결을 확인해주세요.')
+      return
+    }
+
+    const validFiles = selectedFiles.filter((file) => file.size <= maxAttachmentBytes)
+
+    if (validFiles.length !== selectedFiles.length) {
+      setUploadNotice('20MB 이하 파일만 보낼 수 있습니다.')
+    }
+
+    if (validFiles.length === 0) {
+      return
+    }
+
+    setIsUploading(true)
+    setUploadProgress(0)
+
+    try {
+      for (const [index, file] of validFiles.entries()) {
+        const path = createUploadPath(activeRoomId, auth.currentUser.uid, file.name)
+        const snapshot = await uploadStorageFile(file, path, index, validFiles.length)
+        const url = await getDownloadURL(snapshot.ref)
+        const contentType = file.type || 'application/octet-stream'
+        const attachment: MessageAttachment = {
+          kind: contentType.startsWith('image/') ? 'image' : 'file',
+          name: file.name,
+          url,
+          path,
+          contentType,
+          size: file.size,
+        }
+
+        await addDoc(collection(db, 'rooms', activeRoomId, 'messages'), {
+          roomId: activeRoomId,
+          authorId: auth.currentUser.uid,
+          authorName: authSession.nickname,
+          text: file.name,
+          attachment,
+          createdAt: serverTimestamp(),
+        })
+      }
+
+      setUploadNotice('파일을 보냈습니다.')
+      setUploadProgress(100)
+    } catch {
+      setConnectionState('error')
+      setUploadNotice('파일을 보내지 못했습니다. Storage 권한과 설정을 확인해주세요.')
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+
+    event.target.value = ''
+    void handleUploadFiles(files)
+  }
+
+  const handleDragEnter = (event: DragEvent<HTMLElement>) => {
+    if (!Array.from(event.dataTransfer.types).includes('Files')) {
+      return
+    }
+
+    event.preventDefault()
+    dragDepthRef.current += 1
+
+    if (canSendMessage) {
+      setIsDraggingFile(true)
+    }
+  }
+
+  const handleDragOver = (event: DragEvent<HTMLElement>) => {
+    if (!Array.from(event.dataTransfer.types).includes('Files')) {
+      return
+    }
+
+    event.preventDefault()
+    event.dataTransfer.dropEffect = canSendMessage ? 'copy' : 'none'
+  }
+
+  const handleDragLeave = (event: DragEvent<HTMLElement>) => {
+    if (!Array.from(event.dataTransfer.types).includes('Files')) {
+      return
+    }
+
+    event.preventDefault()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+
+    if (dragDepthRef.current === 0) {
+      setIsDraggingFile(false)
+    }
+  }
+
+  const handleDrop = (event: DragEvent<HTMLElement>) => {
+    if (!Array.from(event.dataTransfer.types).includes('Files')) {
+      return
+    }
+
+    event.preventDefault()
+    dragDepthRef.current = 0
+    setIsDraggingFile(false)
+    void handleUploadFiles(Array.from(event.dataTransfer.files))
+  }
+
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
@@ -1287,9 +1539,19 @@ function App() {
       </section>
 
       <section
-        className="conversation-panel"
+        className={`conversation-panel ${isDraggingFile ? 'is-dragging-file' : ''}`}
         aria-label={activeRoom ? `${activeRoom.name} 대화` : '대화'}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
       >
+        {isDraggingFile && (
+          <div className="drop-overlay" aria-hidden="true">
+            <UploadCloud size={34} />
+            <span>여기에 놓으면 전송됩니다.</span>
+          </div>
+        )}
         <div className="mobile-room-tabs" aria-label="모바일 채팅방 전환">
           {chatRooms.map((room) => (
             <button
@@ -1383,7 +1645,32 @@ function App() {
                           <span className="message-time">{message.time}</span>
                         </span>
                       )}
-                      <p className="message-bubble">{message.text}</p>
+                      {message.attachment ? (
+                        <a
+                          className={`attachment-card is-${message.attachment.kind}`}
+                          href={message.attachment.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          download={message.attachment.name}
+                        >
+                          {message.attachment.kind === 'image' ? (
+                            <img src={message.attachment.url} alt={message.attachment.name} />
+                          ) : (
+                            <span className="attachment-icon">
+                              <FileText size={20} />
+                            </span>
+                          )}
+                          <span className="attachment-copy">
+                            <strong>{message.attachment.name}</strong>
+                            <small>
+                              {formatFileSize(message.attachment.size)}
+                              <Download size={13} />
+                            </small>
+                          </span>
+                        </a>
+                      ) : (
+                        <p className="message-bubble">{message.text}</p>
+                      )}
                       {!message.isMine && <span className="message-time">{message.time}</span>}
                     </div>
                   </div>
@@ -1398,12 +1685,50 @@ function App() {
           )}
         </div>
 
+        {(isUploading || uploadNotice) && (
+          <div className="upload-status" role="status">
+            <span>{isUploading ? `업로드 중 ${uploadProgress}%` : uploadNotice}</span>
+            {isUploading && (
+              <span className="upload-meter" aria-hidden="true">
+                <span style={{ width: `${uploadProgress}%` }} />
+              </span>
+            )}
+          </div>
+        )}
+
         <form className="composer" onSubmit={handleSend}>
+          <input
+            ref={fileInputRef}
+            className="visually-hidden"
+            type="file"
+            multiple
+            onChange={handleFileInputChange}
+          />
+          <input
+            ref={imageInputRef}
+            className="visually-hidden"
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFileInputChange}
+          />
           <div className="composer-tools">
-            <button type="button" aria-label="파일 첨부" title="파일 첨부">
+            <button
+              type="button"
+              aria-label="파일 첨부"
+              title="파일 첨부"
+              disabled={!canSendMessage}
+              onClick={() => fileInputRef.current?.click()}
+            >
               <Paperclip size={19} />
             </button>
-            <button type="button" aria-label="이미지 첨부" title="이미지 첨부">
+            <button
+              type="button"
+              aria-label="이미지 첨부"
+              title="이미지 첨부"
+              disabled={!canSendMessage}
+              onClick={() => imageInputRef.current?.click()}
+            >
               <ImageIcon size={19} />
             </button>
             <button type="button" aria-label="이모티콘" title="이모티콘">
