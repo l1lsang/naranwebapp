@@ -8,6 +8,7 @@ import {
   type FormEvent,
 } from 'react'
 import {
+  ArrowLeft,
   Bell,
   Camera,
   CheckCheck,
@@ -22,6 +23,7 @@ import {
   MessageCircle,
   Mic,
   MoreHorizontal,
+  Newspaper,
   Paperclip,
   Phone,
   Plus,
@@ -81,6 +83,7 @@ type UserStatus = 'active' | 'blocked'
 type AdminPanel = 'users' | 'direct' | 'group'
 type RoomType = 'group' | 'direct'
 type AttachmentKind = 'image' | 'file'
+type MobileTab = 'friends' | 'chats' | 'news' | 'calls'
 
 type AuthSession = {
   uid: string
@@ -358,6 +361,8 @@ function App() {
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false)
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([])
   const [activeRoomId, setActiveRoomId] = useState('')
+  const [mobileTab, setMobileTab] = useState<MobileTab>('chats')
+  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [remoteMessages, setRemoteMessages] = useState<ChatMessage[]>([])
@@ -401,6 +406,11 @@ function App() {
   const activeRoom = useMemo(
     () => chatRooms.find((room) => room.id === activeRoomId),
     [activeRoomId, chatRooms],
+  )
+
+  const mobileDirectRooms = useMemo(
+    () => chatRooms.filter((room) => room.type === 'direct'),
+    [chatRooms],
   )
 
   const manageableUsers = useMemo(
@@ -478,6 +488,8 @@ function App() {
         setReadReceipts([])
         setManagedUsers([])
         setActiveRoomId('')
+        setMobileTab('chats')
+        setIsMobileChatOpen(false)
         setAuthReady(true)
         return
       }
@@ -567,9 +579,7 @@ function App() {
             return ''
           }
 
-          return remoteRooms.some((room) => room.id === currentRoomId)
-            ? currentRoomId
-            : remoteRooms[0].id
+          return remoteRooms.some((room) => room.id === currentRoomId) ? currentRoomId : ''
         })
         setConnectionState('live')
       },
@@ -1121,6 +1131,8 @@ function App() {
       setReadReceipts([])
       setManagedUsers([])
       setActiveRoomId('')
+      setMobileTab('chats')
+      setIsMobileChatOpen(false)
     } catch (error) {
       setSettingsError(getAuthErrorMessage(error))
     } finally {
@@ -1135,6 +1147,8 @@ function App() {
     setAuthMessage('')
     setDraft('')
     setAdminNotice('')
+    setMobileTab('chats')
+    setIsMobileChatOpen(false)
 
     if (isFirebaseConfigured && auth) {
       await signOut(auth)
@@ -1148,6 +1162,8 @@ function App() {
     setReadReceipts([])
     setManagedUsers([])
     setActiveRoomId('')
+    setMobileTab('chats')
+    setIsMobileChatOpen(false)
     setConnectionState('error')
   }
 
@@ -1163,9 +1179,29 @@ function App() {
 
   const handleSelectRoom = (roomId: string) => {
     setActiveRoomId(roomId)
+    setMobileTab('chats')
+    setIsMobileChatOpen(true)
     setConnectionState('connecting')
     setRemoteMessages([])
     setReadReceipts([])
+  }
+
+  const handleMobileTabChange = (nextTab: MobileTab) => {
+    setMobileTab(nextTab)
+    setIsMobileChatOpen(false)
+    setActiveRoomId('')
+    setRemoteMessages([])
+    setReadReceipts([])
+    setDraft('')
+  }
+
+  const handleBackToRoomList = () => {
+    setMobileTab('chats')
+    setIsMobileChatOpen(false)
+    setActiveRoomId('')
+    setRemoteMessages([])
+    setReadReceipts([])
+    setDraft('')
   }
 
   const handleCreateDirectChat = async (event: FormEvent<HTMLFormElement>) => {
@@ -1193,6 +1229,8 @@ function App() {
 
     if (existingRoom) {
       setActiveRoomId(existingRoom.id)
+      setMobileTab('chats')
+      setIsMobileChatOpen(true)
       setRemoteMessages([])
       setReadReceipts([])
       setAdminNotice(`${targetUser.nickname}님과의 기존 대화방을 열었습니다.`)
@@ -1221,6 +1259,8 @@ function App() {
       })
 
       setActiveRoomId(roomDoc.id)
+      setMobileTab('chats')
+      setIsMobileChatOpen(true)
       setConnectionState('connecting')
       setReadReceipts([])
       setAdminNotice(`${targetUser.nickname}님과의 대화를 시작했습니다.`)
@@ -1280,6 +1320,8 @@ function App() {
 
       setGroupName('')
       setActiveRoomId(roomDoc.id)
+      setMobileTab('chats')
+      setIsMobileChatOpen(true)
       setConnectionState('connecting')
       setReadReceipts([])
       setAdminNotice(`${roomName} 단톡방을 만들었습니다.`)
@@ -1710,13 +1752,29 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main
+      className={`app-shell is-mobile-tab-${mobileTab} ${
+        isMobileChatOpen && activeRoom ? 'is-mobile-chat-open' : 'is-mobile-list-open'
+      }`}
+    >
       <aside className="rail" aria-label="기본 메뉴">
-        <button className="brand-mark" type="button" aria-label="홈" title="홈">
+        <button
+          className="brand-mark"
+          type="button"
+          onClick={handleBackToRoomList}
+          aria-label="홈"
+          title="홈"
+        >
           <MessageCircle size={25} strokeWidth={2.4} />
         </button>
         <nav className="rail-nav">
-          <button className="rail-button is-active" type="button" aria-label="채팅" title="채팅">
+          <button
+            className="rail-button is-active"
+            type="button"
+            onClick={handleBackToRoomList}
+            aria-label="채팅"
+            title="채팅"
+          >
             <MessageCircle size={21} />
           </button>
           <button className="rail-button" type="button" aria-label="알림" title="알림">
@@ -1847,6 +1905,108 @@ function App() {
         </div>
       </section>
 
+      <section className="mobile-tab-page is-friends" aria-label="친구">
+        <div className="mobile-page-heading">
+          <div>
+            <p className="eyebrow">GreenTalk</p>
+            <h1>친구</h1>
+          </div>
+          <button className="icon-button" type="button" onClick={openSettings} aria-label="내 프로필">
+            <UserRound size={20} />
+          </button>
+        </div>
+        <div className="mobile-page-list">
+          <button className="mobile-page-row" type="button" onClick={openSettings}>
+            <span
+              className="avatar"
+              style={{ backgroundColor: authSession.photoURL ? '#12342d' : '#06c755' }}
+            >
+              {authSession.nickname.slice(0, 1)}
+            </span>
+            <span className="mobile-page-copy">
+              <strong>{authSession.nickname}</strong>
+              <small>내 프로필</small>
+            </span>
+          </button>
+          {mobileDirectRooms.length > 0 ? (
+            mobileDirectRooms.map((room) => (
+              <button
+                className="mobile-page-row"
+                key={room.id}
+                type="button"
+                onClick={() => handleSelectRoom(room.id)}
+              >
+                <span className="avatar" style={{ backgroundColor: room.accent }}>
+                  {room.name.slice(0, 1)}
+                </span>
+                <span className="mobile-page-copy">
+                  <strong>{room.name}</strong>
+                  <small>{room.status}</small>
+                </span>
+              </button>
+            ))
+          ) : (
+            <div className="mobile-page-empty">
+              <UserRound size={28} />
+              <p>표시할 친구가 없습니다.</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="mobile-tab-page is-news" aria-label="뉴스">
+        <div className="mobile-page-heading">
+          <div>
+            <p className="eyebrow">GreenTalk</p>
+            <h1>뉴스</h1>
+          </div>
+        </div>
+        <div className="mobile-page-list">
+          <article className="mobile-news-card">
+            <strong>오늘의 소식</strong>
+            <p>새 알림이 없습니다.</p>
+          </article>
+          <article className="mobile-news-card">
+            <strong>파일 공유</strong>
+            <p>새 파일 소식이 없습니다.</p>
+          </article>
+        </div>
+      </section>
+
+      <section className="mobile-tab-page is-calls" aria-label="통화">
+        <div className="mobile-page-heading">
+          <div>
+            <p className="eyebrow">GreenTalk</p>
+            <h1>통화</h1>
+          </div>
+        </div>
+        <div className="mobile-page-list">
+          {chatRooms.length > 0 ? (
+            chatRooms.map((room) => (
+              <button
+                className="mobile-page-row"
+                key={room.id}
+                type="button"
+                onClick={() => handleSelectRoom(room.id)}
+              >
+                <span className="avatar" style={{ backgroundColor: room.accent }}>
+                  <Phone size={18} />
+                </span>
+                <span className="mobile-page-copy">
+                  <strong>{room.name}</strong>
+                  <small>{room.status}</small>
+                </span>
+              </button>
+            ))
+          ) : (
+            <div className="mobile-page-empty">
+              <Phone size={28} />
+              <p>표시할 통화가 없습니다.</p>
+            </div>
+          )}
+        </div>
+      </section>
+
       <section
         className={`conversation-panel ${isDraggingFile ? 'is-dragging-file' : ''}`}
         aria-label={activeRoom ? `${activeRoom.name} 대화` : '대화'}
@@ -1861,21 +2021,17 @@ function App() {
             <span>여기에 놓으면 전송됩니다.</span>
           </div>
         )}
-        <div className="mobile-room-tabs" aria-label="모바일 채팅방 전환">
-          {chatRooms.map((room) => (
-            <button
-              className={room.id === activeRoomId ? 'is-active' : ''}
-              key={room.id}
-              type="button"
-              onClick={() => handleSelectRoom(room.id)}
-            >
-              {room.name}
-            </button>
-          ))}
-        </div>
-
         <header className="chat-header">
           <div className="chat-title">
+            <button
+              className="mobile-back-button"
+              type="button"
+              onClick={handleBackToRoomList}
+              aria-label="채팅 목록"
+              title="채팅 목록"
+            >
+              <ArrowLeft size={20} />
+            </button>
             <span
               className="avatar large"
               style={{ backgroundColor: activeRoom?.accent ?? '#7a8a84' }}
@@ -2225,6 +2381,45 @@ function App() {
           </div>
         )}
       </aside>
+
+      <nav className="mobile-tab-bar" aria-label="모바일 하단 메뉴">
+        <button
+          className={mobileTab === 'friends' ? 'is-active' : ''}
+          type="button"
+          onClick={() => handleMobileTabChange('friends')}
+          aria-label="친구"
+        >
+          <UserRound size={21} />
+          <span>친구</span>
+        </button>
+        <button
+          className={mobileTab === 'chats' ? 'is-active' : ''}
+          type="button"
+          onClick={() => handleMobileTabChange('chats')}
+          aria-label="대화"
+        >
+          <MessageCircle size={21} />
+          <span>대화</span>
+        </button>
+        <button
+          className={mobileTab === 'news' ? 'is-active' : ''}
+          type="button"
+          onClick={() => handleMobileTabChange('news')}
+          aria-label="뉴스"
+        >
+          <Newspaper size={21} />
+          <span>뉴스</span>
+        </button>
+        <button
+          className={mobileTab === 'calls' ? 'is-active' : ''}
+          type="button"
+          onClick={() => handleMobileTabChange('calls')}
+          aria-label="통화"
+        >
+          <Phone size={21} />
+          <span>통화</span>
+        </button>
+      </nav>
 
       {isSettingsOpen && (
         <div className="settings-backdrop" role="presentation">
