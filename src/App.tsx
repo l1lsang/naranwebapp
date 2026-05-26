@@ -9,11 +9,13 @@ import {
 } from 'react'
 import {
   Bell,
+  Camera,
   CheckCheck,
   Download,
   FileText,
   Image as ImageIcon,
   Info,
+  KeyRound,
   LockKeyhole,
   LogOut,
   Mail,
@@ -28,22 +30,29 @@ import {
   Settings,
   ShieldCheck,
   Smile,
+  Trash2,
   UploadCloud,
   UserRound,
   Video,
+  X,
 } from 'lucide-react'
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
+  EmailAuthProvider,
   onAuthStateChanged,
+  reauthenticateWithCredential,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
+  updatePassword,
   updateProfile,
   type User,
 } from 'firebase/auth'
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDoc,
   limit,
@@ -56,6 +65,7 @@ import {
   type Timestamp,
 } from 'firebase/firestore'
 import {
+  deleteObject,
   getDownloadURL,
   ref as storageRef,
   uploadBytesResumable,
@@ -78,6 +88,8 @@ type AuthSession = {
   nickname: string
   role: UserRole
   status: UserStatus
+  photoURL: string
+  photoPath: string
 }
 
 type ManagedUser = {
@@ -86,6 +98,7 @@ type ManagedUser = {
   nickname: string
   role: UserRole
   status: UserStatus
+  photoURL?: string
 }
 
 type ChatRoom = {
@@ -152,6 +165,8 @@ type StoredUserProfile = {
   nickname?: unknown
   role?: unknown
   status?: unknown
+  photoURL?: unknown
+  photoPath?: unknown
 }
 
 const timeFormatter = new Intl.DateTimeFormat('ko-KR', {
@@ -173,6 +188,7 @@ const statusCopy: Record<UserStatus, string> = {
 }
 
 const maxAttachmentBytes = 20 * 1024 * 1024
+const maxProfileImageBytes = 5 * 1024 * 1024
 
 const formatTime = (date = new Date()) => timeFormatter.format(date)
 
@@ -203,6 +219,16 @@ const createUploadPath = (roomId: string, userId: string, fileName: string) => {
       : `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
   return `chatFiles/${roomId}/${userId}/${uniqueId}-${safeName}`
+}
+
+const createProfileImagePath = (userId: string, fileName: string) => {
+  const safeName = sanitizeStorageName(fileName)
+  const uniqueId =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+  return `profileImages/${userId}/${uniqueId}-${safeName}`
 }
 
 const getFallbackNickname = (email: string) => {
@@ -270,6 +296,14 @@ const getAuthErrorMessage = (error: unknown) => {
     return '이메일 또는 비밀번호를 확인해주세요.'
   }
 
+  if (code.includes('auth/wrong-password')) {
+    return '현재 비밀번호를 확인해주세요.'
+  }
+
+  if (code.includes('auth/requires-recent-login')) {
+    return '보안을 위해 다시 로그인한 뒤 시도해주세요.'
+  }
+
   if (code.includes('auth/weak-password')) {
     return '비밀번호는 6자 이상으로 입력해주세요.'
   }
@@ -285,6 +319,8 @@ const buildSessionFromUser = async (user: User): Promise<AuthSession> => {
   let nickname = user.displayName ?? ''
   let role: UserRole = 'user'
   let status: UserStatus = 'active'
+  let photoURL = user.photoURL ?? ''
+  let photoPath = ''
 
   if (db) {
     const profileSnapshot = await getDoc(doc(db, 'users', user.uid))
@@ -293,6 +329,8 @@ const buildSessionFromUser = async (user: User): Promise<AuthSession> => {
     nickname = typeof profile?.nickname === 'string' ? profile.nickname : nickname
     role = normalizeRole(profile?.role)
     status = normalizeStatus(profile?.status)
+    photoURL = typeof profile?.photoURL === 'string' ? profile.photoURL : photoURL
+    photoPath = typeof profile?.photoPath === 'string' ? profile.photoPath : photoPath
   }
 
   return {
@@ -301,6 +339,8 @@ const buildSessionFromUser = async (user: User): Promise<AuthSession> => {
     nickname,
     role,
     status,
+    photoURL,
+    photoPath,
   }
 }
 
@@ -327,6 +367,18 @@ function App() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadNotice, setUploadNotice] = useState('')
   const [isDraggingFile, setIsDraggingFile] = useState(false)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [settingsNickname, setSettingsNickname] = useState('')
+  const [settingsCurrentPassword, setSettingsCurrentPassword] = useState('')
+  const [settingsNewPassword, setSettingsNewPassword] = useState('')
+  const [settingsConfirmPassword, setSettingsConfirmPassword] = useState('')
+  const [deletePassword, setDeletePassword] = useState('')
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [settingsError, setSettingsError] = useState('')
+  const [settingsNotice, setSettingsNotice] = useState('')
+  const [isSettingsSubmitting, setIsSettingsSubmitting] = useState(false)
+  const [isProfileImageUploading, setIsProfileImageUploading] = useState(false)
+  const [profileImageProgress, setProfileImageProgress] = useState(0)
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([])
   const [adminPanel, setAdminPanel] = useState<AdminPanel>('users')
   const [adminNotice, setAdminNotice] = useState('')
@@ -336,6 +388,7 @@ function App() {
   const lastMarkedReadRef = useRef('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
+  const profileImageInputRef = useRef<HTMLInputElement | null>(null)
   const dragDepthRef = useRef(0)
 
   const isAdmin = authSession?.role === 'admin'
@@ -446,6 +499,8 @@ function App() {
             nickname: user.displayName ?? '',
             role: 'user',
             status: 'active',
+            photoURL: user.photoURL ?? '',
+            photoPath: '',
           })
           setAuthReady(true)
         }
@@ -551,6 +606,7 @@ function App() {
             nickname: fallbackNickname,
             role: normalizeRole(data.role),
             status: normalizeStatus(data.status),
+            photoURL: typeof data.photoURL === 'string' ? data.photoURL : '',
           }
         })
 
@@ -772,6 +828,8 @@ function App() {
           nickname,
           role: 'user',
           status: 'active',
+          photoURL: user.photoURL ?? '',
+          photoPath: '',
         })
         setConnectionState('connecting')
         return
@@ -822,6 +880,251 @@ function App() {
       setAuthError(getAuthErrorMessage(error))
     } finally {
       setIsAuthSubmitting(false)
+    }
+  }
+
+  const openSettings = () => {
+    if (!authSession) {
+      return
+    }
+
+    setSettingsNickname(authSession.nickname)
+    setSettingsCurrentPassword('')
+    setSettingsNewPassword('')
+    setSettingsConfirmPassword('')
+    setDeletePassword('')
+    setDeleteConfirmText('')
+    setSettingsError('')
+    setSettingsNotice('')
+    setProfileImageProgress(0)
+    setIsSettingsOpen(true)
+  }
+
+  const closeSettings = () => {
+    if (isSettingsSubmitting || isProfileImageUploading) {
+      return
+    }
+
+    setIsSettingsOpen(false)
+  }
+
+  const reauthenticateCurrentUser = async (password: string) => {
+    if (!auth?.currentUser?.email) {
+      throw new Error('현재 로그인 정보를 확인할 수 없습니다.')
+    }
+
+    const credential = EmailAuthProvider.credential(auth.currentUser.email, password)
+
+    await reauthenticateWithCredential(auth.currentUser, credential)
+  }
+
+  const handleSettingsNicknameSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    if (!authSession || !auth?.currentUser || !db) {
+      setSettingsError('Firebase 연결을 확인해주세요.')
+      return
+    }
+
+    const nickname = settingsNickname.trim()
+
+    setSettingsError('')
+    setSettingsNotice('')
+
+    if (nickname.length < 2) {
+      setSettingsError('닉네임은 2자 이상으로 입력해주세요.')
+      return
+    }
+
+    setIsSettingsSubmitting(true)
+
+    try {
+      await updateProfile(auth.currentUser, { displayName: nickname })
+      await saveUserProfile(authSession.uid, authSession.email, nickname)
+      setAuthSession({ ...authSession, nickname })
+      setSettingsNotice('닉네임을 변경했습니다.')
+    } catch (error) {
+      setSettingsError(getAuthErrorMessage(error))
+    } finally {
+      setIsSettingsSubmitting(false)
+    }
+  }
+
+  const uploadProfileImage = (file: File, path: string) =>
+    new Promise<UploadTaskSnapshot>((resolve, reject) => {
+      if (!fileStorage) {
+        reject(new Error('Firebase Storage is not configured.'))
+        return
+      }
+
+      const task = uploadBytesResumable(storageRef(fileStorage, path), file, {
+        contentType: file.type,
+        customMetadata: {
+          uploadedBy: authSession?.uid ?? '',
+          purpose: 'profile',
+        },
+      })
+
+      task.on(
+        'state_changed',
+        (snapshot) => {
+          const progress =
+            snapshot.totalBytes > 0
+              ? Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)
+              : 0
+
+          setProfileImageProgress(progress)
+        },
+        reject,
+        () => resolve(task.snapshot),
+      )
+    })
+
+  const handleProfileImageChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+
+    event.target.value = ''
+
+    if (!file) {
+      return
+    }
+
+    if (!authSession || !auth?.currentUser || !db || !fileStorage) {
+      setSettingsError('Firebase Storage 연결을 확인해주세요.')
+      return
+    }
+
+    setSettingsError('')
+    setSettingsNotice('')
+
+    if (!file.type.startsWith('image/')) {
+      setSettingsError('이미지 파일만 등록할 수 있습니다.')
+      return
+    }
+
+    if (file.size > maxProfileImageBytes) {
+      setSettingsError('프로필 사진은 5MB 이하만 등록할 수 있습니다.')
+      return
+    }
+
+    setIsProfileImageUploading(true)
+    setProfileImageProgress(0)
+
+    try {
+      const path = createProfileImagePath(authSession.uid, file.name)
+      const snapshot = await uploadProfileImage(file, path)
+      const photoURL = await getDownloadURL(snapshot.ref)
+      const previousPhotoPath = authSession.photoPath
+
+      await updateProfile(auth.currentUser, { photoURL })
+      await setDoc(
+        doc(db, 'users', authSession.uid),
+        {
+          photoURL,
+          photoPath: path,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      )
+      setAuthSession({ ...authSession, photoURL, photoPath: path })
+      setSettingsNotice('프로필 사진을 변경했습니다.')
+      setProfileImageProgress(100)
+
+      if (previousPhotoPath) {
+        void deleteObject(storageRef(fileStorage, previousPhotoPath)).catch(() => undefined)
+      }
+    } catch {
+      setSettingsError('프로필 사진을 변경하지 못했습니다.')
+    } finally {
+      setIsProfileImageUploading(false)
+    }
+  }
+
+  const handlePasswordChangeSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    setSettingsError('')
+    setSettingsNotice('')
+
+    if (!settingsCurrentPassword) {
+      setSettingsError('현재 비밀번호를 입력해주세요.')
+      return
+    }
+
+    if (settingsNewPassword.length < 6) {
+      setSettingsError('새 비밀번호는 6자 이상으로 입력해주세요.')
+      return
+    }
+
+    if (settingsNewPassword !== settingsConfirmPassword) {
+      setSettingsError('새 비밀번호 확인이 일치하지 않습니다.')
+      return
+    }
+
+    setIsSettingsSubmitting(true)
+
+    try {
+      await reauthenticateCurrentUser(settingsCurrentPassword)
+
+      if (!auth?.currentUser) {
+        throw new Error('현재 로그인 정보를 확인할 수 없습니다.')
+      }
+
+      await updatePassword(auth.currentUser, settingsNewPassword)
+      setSettingsCurrentPassword('')
+      setSettingsNewPassword('')
+      setSettingsConfirmPassword('')
+      setSettingsNotice('비밀번호를 변경했습니다.')
+    } catch (error) {
+      setSettingsError(getAuthErrorMessage(error))
+    } finally {
+      setIsSettingsSubmitting(false)
+    }
+  }
+
+  const handleDeleteAccountSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    if (!authSession || !auth?.currentUser || !db) {
+      setSettingsError('Firebase 연결을 확인해주세요.')
+      return
+    }
+
+    setSettingsError('')
+    setSettingsNotice('')
+
+    if (!deletePassword) {
+      setSettingsError('현재 비밀번호를 입력해주세요.')
+      return
+    }
+
+    if (deleteConfirmText.trim() !== '탈퇴') {
+      setSettingsError('확인 문구를 입력해주세요.')
+      return
+    }
+
+    setIsSettingsSubmitting(true)
+
+    try {
+      await reauthenticateCurrentUser(deletePassword)
+
+      if (authSession.photoPath && fileStorage) {
+        await deleteObject(storageRef(fileStorage, authSession.photoPath)).catch(() => undefined)
+      }
+
+      await deleteDoc(doc(db, 'users', authSession.uid))
+      await deleteUser(auth.currentUser)
+      setIsSettingsOpen(false)
+      setAuthSession(null)
+      setChatRooms([])
+      setRemoteMessages([])
+      setReadReceipts([])
+      setManagedUsers([])
+      setActiveRoomId('')
+    } catch (error) {
+      setSettingsError(getAuthErrorMessage(error))
+    } finally {
+      setIsSettingsSubmitting(false)
     }
   }
 
@@ -1431,7 +1734,13 @@ function App() {
               <ShieldCheck size={21} />
             </button>
           )}
-          <button className="rail-button" type="button" aria-label="설정" title="설정">
+          <button
+            className="rail-button"
+            type="button"
+            onClick={openSettings}
+            aria-label="설정"
+            title="설정"
+          >
             <Settings size={21} />
           </button>
         </nav>
@@ -1916,6 +2225,168 @@ function App() {
           </div>
         )}
       </aside>
+
+      {isSettingsOpen && (
+        <div className="settings-backdrop" role="presentation">
+          <section className="settings-dialog" aria-label="프로필 설정">
+            <header className="settings-header">
+              <div>
+                <p className="eyebrow">GreenTalk</p>
+                <h2>프로필 설정</h2>
+              </div>
+              <button className="icon-button" type="button" onClick={closeSettings} aria-label="닫기">
+                <X size={20} />
+              </button>
+            </header>
+
+            <div className="settings-profile">
+              <span className="settings-avatar">
+                {authSession.photoURL ? (
+                  <img src={authSession.photoURL} alt={authSession.nickname} />
+                ) : (
+                  authSession.nickname.slice(0, 1)
+                )}
+              </span>
+              <div>
+                <strong>{authSession.nickname}</strong>
+                <span>{authSession.email}</span>
+              </div>
+              <input
+                ref={profileImageInputRef}
+                className="visually-hidden"
+                type="file"
+                accept="image/*"
+                onChange={handleProfileImageChange}
+              />
+              <button
+                className="settings-tool-button"
+                type="button"
+                disabled={isProfileImageUploading || isSettingsSubmitting}
+                onClick={() => profileImageInputRef.current?.click()}
+              >
+                <Camera size={17} />
+                사진 변경
+              </button>
+            </div>
+
+            {isProfileImageUploading && (
+              <div className="upload-status is-settings" role="status">
+                <span>사진 업로드 중 {profileImageProgress}%</span>
+                <span className="upload-meter" aria-hidden="true">
+                  <span style={{ width: `${profileImageProgress}%` }} />
+                </span>
+              </div>
+            )}
+
+            {settingsError && (
+              <p className="form-message is-error" role="alert">
+                {settingsError}
+              </p>
+            )}
+            {settingsNotice && <p className="form-message is-success">{settingsNotice}</p>}
+
+            <form className="settings-section" onSubmit={handleSettingsNicknameSubmit}>
+              <div className="settings-section-title">
+                <UserRound size={18} />
+                <h3>닉네임</h3>
+              </div>
+              <label className="field">
+                <span>닉네임</span>
+                <div className="field-control">
+                  <UserRound size={18} />
+                  <input
+                    value={settingsNickname}
+                    onChange={(event) => setSettingsNickname(event.target.value)}
+                    autoComplete="nickname"
+                  />
+                </div>
+              </label>
+              <button className="primary-button" type="submit" disabled={isSettingsSubmitting}>
+                저장
+              </button>
+            </form>
+
+            <form className="settings-section" onSubmit={handlePasswordChangeSubmit}>
+              <div className="settings-section-title">
+                <KeyRound size={18} />
+                <h3>비밀번호</h3>
+              </div>
+              <label className="field">
+                <span>현재 비밀번호</span>
+                <div className="field-control">
+                  <LockKeyhole size={18} />
+                  <input
+                    type="password"
+                    value={settingsCurrentPassword}
+                    onChange={(event) => setSettingsCurrentPassword(event.target.value)}
+                    autoComplete="current-password"
+                  />
+                </div>
+              </label>
+              <label className="field">
+                <span>새 비밀번호</span>
+                <div className="field-control">
+                  <KeyRound size={18} />
+                  <input
+                    type="password"
+                    value={settingsNewPassword}
+                    onChange={(event) => setSettingsNewPassword(event.target.value)}
+                    autoComplete="new-password"
+                  />
+                </div>
+              </label>
+              <label className="field">
+                <span>새 비밀번호 확인</span>
+                <div className="field-control">
+                  <KeyRound size={18} />
+                  <input
+                    type="password"
+                    value={settingsConfirmPassword}
+                    onChange={(event) => setSettingsConfirmPassword(event.target.value)}
+                    autoComplete="new-password"
+                  />
+                </div>
+              </label>
+              <button className="primary-button" type="submit" disabled={isSettingsSubmitting}>
+                비밀번호 변경
+              </button>
+            </form>
+
+            <form className="settings-section danger-zone" onSubmit={handleDeleteAccountSubmit}>
+              <div className="settings-section-title">
+                <Trash2 size={18} />
+                <h3>계정 탈퇴</h3>
+              </div>
+              <label className="field">
+                <span>현재 비밀번호</span>
+                <div className="field-control">
+                  <LockKeyhole size={18} />
+                  <input
+                    type="password"
+                    value={deletePassword}
+                    onChange={(event) => setDeletePassword(event.target.value)}
+                    autoComplete="current-password"
+                  />
+                </div>
+              </label>
+              <label className="field">
+                <span>확인 문구</span>
+                <div className="field-control">
+                  <Trash2 size={18} />
+                  <input
+                    value={deleteConfirmText}
+                    onChange={(event) => setDeleteConfirmText(event.target.value)}
+                    placeholder="탈퇴"
+                  />
+                </div>
+              </label>
+              <button className="danger-button" type="submit" disabled={isSettingsSubmitting}>
+                계정 탈퇴
+              </button>
+            </form>
+          </section>
+        </div>
+      )}
     </main>
   )
 }

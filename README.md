@@ -24,7 +24,7 @@ VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
 ```
 
-사용자 프로필과 동의 기록은 `users/{uid}` 문서에 저장됩니다. 신규 가입자는 기본 `role: "user"`로 생성됩니다.
+사용자 프로필과 동의 기록은 `users/{uid}` 문서에 저장됩니다. 신규 가입자는 기본 `role: "user"`로 생성됩니다. 닉네임, 프로필 사진 URL, 프로필 사진 Storage 경로도 같은 문서에 저장됩니다.
 
 관리자 계정은 Firebase 콘솔에서 해당 `users/{uid}` 문서의 `role`을 `"admin"`으로 바꿔서 지정합니다. 관리자만 유저 목록 조회, 유저 상태/권한 변경, 1:1 대화 시작, 단톡방 생성이 가능합니다.
 

@@ -15,5 +15,19 @@ service firebase.storage {
         && request.resource.size > 0
         && request.resource.size <= 20 * 1024 * 1024;
     }
+
+    match /profileImages/{userId}/{fileName} {
+      allow read: if signedIn();
+
+      allow create, update: if signedIn()
+        && request.auth.uid == userId
+        && request.resource != null
+        && request.resource.size > 0
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+
+      allow delete: if signedIn()
+        && request.auth.uid == userId;
+    }
   }
 }

@@ -33,6 +33,8 @@ service cloud.firestore {
         'nickname',
         'role',
         'status',
+        'photoURL',
+        'photoPath',
         'thirdPartyConsent',
         'thirdPartyConsentAt',
         'createdAt',
@@ -43,7 +45,21 @@ service cloud.firestore {
       && request.resource.data.nickname.size() >= 2
       && request.resource.data.nickname.size() <= 24
       && request.resource.data.role in ['user', 'admin']
-      && request.resource.data.status in ['active', 'blocked'];
+      && request.resource.data.status in ['active', 'blocked']
+      && (
+        !request.resource.data.keys().hasAny(['photoURL'])
+        || (
+          request.resource.data.photoURL is string
+          && request.resource.data.photoURL.size() <= 2048
+        )
+      )
+      && (
+        !request.resource.data.keys().hasAny(['photoPath'])
+        || (
+          request.resource.data.photoPath is string
+          && request.resource.data.photoPath.matches('profileImages/' + userId + '/.*')
+        )
+      );
     }
 
     function validReadReceipt(userId) {
@@ -113,7 +129,7 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if false;
+      allow delete: if signedIn() && request.auth.uid == userId;
     }
 
     match /rooms/{roomId} {
