@@ -62,8 +62,8 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  Timestamp,
   where,
-  type Timestamp,
 } from 'firebase/firestore'
 import {
   deleteObject,
@@ -79,10 +79,11 @@ type AuthMode = 'login' | 'signup' | 'reset'
 type ConnectionState = 'connecting' | 'live' | 'error'
 type UserRole = 'user' | 'admin'
 type UserStatus = 'active' | 'blocked'
-type AdminPanel = 'users' | 'direct' | 'group'
+type AdminPanel = 'users' | 'direct' | 'group' | 'retention'
 type RoomType = 'group' | 'direct'
 type AttachmentKind = 'image' | 'file'
 type MobileTab = 'friends' | 'chats' | 'news' | 'calls'
+type RetentionPolicy = 'oneDay' | 'oneMonth'
 
 type AuthSession = {
   uid: string
@@ -112,6 +113,7 @@ type ChatRoom = {
   accent: string
   status: string
   type: RoomType
+  retentionPolicy: RetentionPolicy
   participantIds?: string[]
 }
 
@@ -159,6 +161,7 @@ type StoredRoom = {
   subtitle?: unknown
   status?: unknown
   type?: unknown
+  retentionPolicy?: unknown
   participantIds?: unknown
 }
 
@@ -187,6 +190,23 @@ const roleCopy: Record<UserRole, string> = {
 const statusCopy: Record<UserStatus, string> = {
   active: '활성',
   blocked: '차단',
+}
+
+const defaultRetentionPolicy: RetentionPolicy = 'oneDay'
+
+const retentionCopy: Record<RetentionPolicy, string> = {
+  oneDay: '1일 후 삭제',
+  oneMonth: '1달 지난 데이터 삭제',
+}
+
+const retentionDescription: Record<RetentionPolicy, string> = {
+  oneDay: '새 메시지와 파일 메시지를 1일 뒤 서버 TTL 삭제 대상으로 저장합니다.',
+  oneMonth: '새 메시지와 파일 메시지를 30일 뒤 서버 TTL 삭제 대상으로 저장합니다.',
+}
+
+const retentionDays: Record<RetentionPolicy, number> = {
+  oneDay: 1,
+  oneMonth: 30,
 }
 
 const maxAttachmentBytes = 20 * 1024 * 1024
@@ -243,7 +263,13 @@ const normalizeRole = (role: unknown): UserRole => (role === 'admin' ? 'admin' :
 const normalizeStatus = (status: unknown): UserStatus =>
   status === 'blocked' ? 'blocked' : 'active'
 
+const normalizeRetentionPolicy = (policy: unknown): RetentionPolicy =>
+  policy === 'oneMonth' ? 'oneMonth' : defaultRetentionPolicy
+
 const getRoomAccent = (seed: number) => roomAccents[seed % roomAccents.length]
+
+const getRetentionExpiresAt = (policy: RetentionPolicy) =>
+  Timestamp.fromMillis(Date.now() + retentionDays[policy] * 24 * 60 * 60 * 1000)
 
 const normalizeAttachment = (attachment: unknown): MessageAttachment | undefined => {
   if (!attachment || typeof attachment !== 'object') {
@@ -389,6 +415,7 @@ function App() {
   const [directTargetId, setDirectTargetId] = useState('')
   const [groupName, setGroupName] = useState('')
   const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([])
+  const [retentionRoomId, setRetentionRoomId] = useState('')
   const lastMarkedReadRef = useRef('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
@@ -410,6 +437,11 @@ function App() {
   const mobileDirectRooms = useMemo(
     () => chatRooms.filter((room) => room.type === 'direct'),
     [chatRooms],
+  )
+
+  const retentionTargetRoom = useMemo(
+    () => chatRooms.find((room) => room.id === retentionRoomId) ?? chatRooms[0],
+    [chatRooms, retentionRoomId],
   )
 
   const manageableUsers = useMemo(
@@ -489,6 +521,7 @@ function App() {
         setActiveRoomId('')
         setMobileTab('chats')
         setIsMobileChatOpen(false)
+        setRetentionRoomId('')
         setAuthReady(true)
         return
       }
@@ -562,6 +595,7 @@ function App() {
             accent: getRoomAccent(index + 1),
             status: typeof data.status === 'string' ? data.status : '대화 가능',
             type,
+            retentionPolicy: normalizeRetentionPolicy(data.retentionPolicy),
             participantIds,
           }
         })
@@ -735,12 +769,13 @@ function App() {
         userId: authSession.uid,
         lastReadMessageId: latestMessage.id,
         updatedAt: serverTimestamp(),
+        expiresAt: getRetentionExpiresAt(activeRoom?.retentionPolicy ?? defaultRetentionPolicy),
       },
       { merge: true },
     ).catch(() => {
       setAdminNotice('읽음 상태를 저장하지 못했습니다.')
     })
-  }, [activeRoomId, authSession, visibleMessages])
+  }, [activeRoom?.retentionPolicy, activeRoomId, authSession, visibleMessages])
 
   const switchAuthMode = (nextMode: AuthMode) => {
     setAuthMode(nextMode)
@@ -1132,6 +1167,7 @@ function App() {
       setActiveRoomId('')
       setMobileTab('chats')
       setIsMobileChatOpen(false)
+      setRetentionRoomId('')
     } catch (error) {
       setSettingsError(getAuthErrorMessage(error))
     } finally {
@@ -1148,6 +1184,7 @@ function App() {
     setAdminNotice('')
     setMobileTab('chats')
     setIsMobileChatOpen(false)
+    setRetentionRoomId('')
 
     if (isFirebaseConfigured && auth) {
       await signOut(auth)
@@ -1163,6 +1200,7 @@ function App() {
     setActiveRoomId('')
     setMobileTab('chats')
     setIsMobileChatOpen(false)
+    setRetentionRoomId('')
     setConnectionState('error')
   }
 
@@ -1228,6 +1266,7 @@ function App() {
 
     if (existingRoom) {
       setActiveRoomId(existingRoom.id)
+      setRetentionRoomId(existingRoom.id)
       setMobileTab('chats')
       setIsMobileChatOpen(true)
       setRemoteMessages([])
@@ -1251,6 +1290,7 @@ function App() {
         subtitle,
         status: '1:1',
         type: 'direct',
+        retentionPolicy: defaultRetentionPolicy,
         participantIds,
         createdBy: authSession.uid,
         createdAt: serverTimestamp(),
@@ -1258,6 +1298,7 @@ function App() {
       })
 
       setActiveRoomId(roomDoc.id)
+      setRetentionRoomId(roomDoc.id)
       setMobileTab('chats')
       setIsMobileChatOpen(true)
       setConnectionState('connecting')
@@ -1311,6 +1352,7 @@ function App() {
         subtitle,
         status: '단톡',
         type: 'group',
+        retentionPolicy: defaultRetentionPolicy,
         participantIds,
         createdBy: authSession.uid,
         createdAt: serverTimestamp(),
@@ -1319,6 +1361,7 @@ function App() {
 
       setGroupName('')
       setActiveRoomId(roomDoc.id)
+      setRetentionRoomId(roomDoc.id)
       setMobileTab('chats')
       setIsMobileChatOpen(true)
       setConnectionState('connecting')
@@ -1383,6 +1426,41 @@ function App() {
       setAdminNotice(`${user.nickname}님 권한을 ${roleCopy[nextRole]}으로 변경했습니다.`)
     } catch {
       setAdminNotice('유저 권한을 변경하지 못했습니다.')
+    }
+  }
+
+  const handleUpdateRoomRetention = async (roomId: string, nextPolicy: RetentionPolicy) => {
+    if (!isAdmin) {
+      setAdminNotice('관리자만 삭제 정책을 변경할 수 있습니다.')
+      return
+    }
+
+    const targetRoom = chatRooms.find((room) => room.id === roomId)
+
+    if (!targetRoom) {
+      setAdminNotice('삭제 정책을 설정할 채팅방을 선택해주세요.')
+      return
+    }
+
+    try {
+      if (!isFirebaseConfigured || !db) {
+        setConnectionState('error')
+        setAdminNotice('Firebase 연결을 확인해주세요.')
+        return
+      }
+
+      await setDoc(
+        doc(db, 'rooms', roomId),
+        {
+          retentionPolicy: nextPolicy,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      )
+      setRetentionRoomId(roomId)
+      setAdminNotice(`${targetRoom.name} 삭제 정책을 ${retentionCopy[nextPolicy]}로 변경했습니다.`)
+    } catch {
+      setAdminNotice('삭제 정책을 변경하지 못했습니다.')
     }
   }
 
@@ -1452,6 +1530,8 @@ function App() {
     setUploadProgress(0)
 
     try {
+      const messageRetentionPolicy = activeRoom?.retentionPolicy ?? defaultRetentionPolicy
+
       for (const [index, file] of validFiles.entries()) {
         const path = createUploadPath(activeRoomId, auth.currentUser.uid, file.name)
         const snapshot = await uploadStorageFile(file, path, index, validFiles.length)
@@ -1473,6 +1553,7 @@ function App() {
           text: file.name,
           attachment,
           createdAt: serverTimestamp(),
+          expiresAt: getRetentionExpiresAt(messageRetentionPolicy),
         })
       }
 
@@ -1561,6 +1642,7 @@ function App() {
         authorName: authSession.nickname,
         text,
         createdAt: serverTimestamp(),
+        expiresAt: getRetentionExpiresAt(activeRoom?.retentionPolicy ?? defaultRetentionPolicy),
       })
       setDraft('')
     } catch {
@@ -1750,6 +1832,165 @@ function App() {
     )
   }
 
+  const renderAdminConsole = (variant: 'desktop' | 'mobile') => {
+    const selectedRetentionRoomId = retentionTargetRoom?.id ?? ''
+
+    return (
+      <div className={`admin-console is-${variant}`}>
+        <div className="admin-tabs" role="tablist" aria-label="관리 메뉴">
+          <button
+            className={adminPanel === 'users' ? 'is-active' : ''}
+            type="button"
+            onClick={() => openAdminPanel('users')}
+          >
+            유저
+          </button>
+          <button
+            className={adminPanel === 'direct' ? 'is-active' : ''}
+            type="button"
+            onClick={() => openAdminPanel('direct')}
+          >
+            1:1
+          </button>
+          <button
+            className={adminPanel === 'group' ? 'is-active' : ''}
+            type="button"
+            onClick={() => openAdminPanel('group')}
+          >
+            단톡
+          </button>
+          <button
+            className={adminPanel === 'retention' ? 'is-active' : ''}
+            type="button"
+            onClick={() => openAdminPanel('retention')}
+          >
+            삭제
+          </button>
+        </div>
+
+        {adminPanel === 'users' && (
+          <div className="managed-user-list">
+            {managedUsers.map((user) => (
+              <article className="managed-user-row" key={user.id}>
+                <span className="avatar small">{user.nickname.slice(0, 1)}</span>
+                <div>
+                  <strong>{user.nickname}</strong>
+                  <span>{user.email || '이메일 없음'}</span>
+                  <small>
+                    {roleCopy[user.role]} · {statusCopy[user.status]}
+                  </small>
+                </div>
+                <div className="user-actions">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleUserRole(user)}
+                    disabled={user.id === authSession.uid}
+                  >
+                    권한
+                  </button>
+                  <button type="button" onClick={() => handleToggleUserStatus(user)}>
+                    {user.status === 'active' ? '차단' : '해제'}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+
+        {adminPanel === 'direct' && (
+          <form className="admin-form" onSubmit={handleCreateDirectChat}>
+            <label className="field">
+              <span>대화할 유저</span>
+              <select
+                value={directTargetId || manageableUsers[0]?.id || ''}
+                onChange={(event) => setDirectTargetId(event.target.value)}
+                disabled={manageableUsers.length === 0}
+              >
+                {manageableUsers.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.nickname} · {roleCopy[user.role]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button className="primary-button" type="submit">
+              1:1 대화 시작
+            </button>
+          </form>
+        )}
+
+        {adminPanel === 'group' && (
+          <form className="admin-form" onSubmit={handleCreateGroupChat}>
+            <label className="field">
+              <span>단톡 이름</span>
+              <div className="field-control">
+                <MessageCircle size={18} />
+                <input
+                  value={groupName}
+                  onChange={(event) => setGroupName(event.target.value)}
+                  placeholder="예: 신규 상담팀"
+                />
+              </div>
+            </label>
+            <div className="group-member-list">
+              {manageableUsers.map((user) => (
+                <label className="member-check" key={user.id}>
+                  <input
+                    type="checkbox"
+                    checked={selectedGroupMemberIds.includes(user.id)}
+                    onChange={() => toggleGroupMember(user.id)}
+                  />
+                  <span>{user.nickname}</span>
+                  <small>{statusCopy[user.status]}</small>
+                </label>
+              ))}
+            </div>
+            <button className="primary-button" type="submit">
+              단톡 만들기
+            </button>
+          </form>
+        )}
+
+        {adminPanel === 'retention' && (
+          <div className="admin-form retention-form">
+            <label className="field">
+              <span>설정할 채팅방</span>
+              <select
+                value={selectedRetentionRoomId}
+                onChange={(event) => setRetentionRoomId(event.target.value)}
+                disabled={chatRooms.length === 0}
+              >
+                {chatRooms.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {room.name} · {retentionCopy[room.retentionPolicy]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="retention-options" role="radiogroup" aria-label="삭제 정책">
+              {(['oneDay', 'oneMonth'] as RetentionPolicy[]).map((policy) => (
+                <button
+                  className={retentionTargetRoom?.retentionPolicy === policy ? 'is-active' : ''}
+                  key={policy}
+                  type="button"
+                  onClick={() => void handleUpdateRoomRetention(selectedRetentionRoomId, policy)}
+                  disabled={!selectedRetentionRoomId}
+                  aria-pressed={retentionTargetRoom?.retentionPolicy === policy}
+                >
+                  <strong>{retentionCopy[policy]}</strong>
+                  <small>{retentionDescription[policy]}</small>
+                </button>
+              ))}
+            </div>
+            <p className="retention-note">
+              기본값은 1일 후 삭제입니다. 변경한 정책은 새로 저장되는 메시지부터 적용됩니다.
+            </p>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <main
       className={`app-shell is-mobile-tab-${mobileTab} ${
@@ -1866,12 +2107,18 @@ function App() {
               <Plus size={16} />
               단톡
             </button>
+            <button type="button" onClick={() => openAdminPanel('retention')}>
+              <Trash2 size={16} />
+              삭제
+            </button>
           </div>
         ) : (
           <p className="permission-note">기존 채팅방에서만 메시지를 보낼 수 있습니다.</p>
         )}
 
         {adminNotice && <p className="admin-notice">{adminNotice}</p>}
+
+        {isAdmin && <div className="mobile-admin-console">{renderAdminConsole('mobile')}</div>}
 
         <div className="room-list">
           {filteredRooms.length > 0 ? (
@@ -2255,114 +2502,7 @@ function App() {
         </div>
 
         {isAdmin ? (
-          <div className="admin-console">
-            <div className="admin-tabs" role="tablist" aria-label="관리 메뉴">
-              <button
-                className={adminPanel === 'users' ? 'is-active' : ''}
-                type="button"
-                onClick={() => openAdminPanel('users')}
-              >
-                유저
-              </button>
-              <button
-                className={adminPanel === 'direct' ? 'is-active' : ''}
-                type="button"
-                onClick={() => openAdminPanel('direct')}
-              >
-                1:1
-              </button>
-              <button
-                className={adminPanel === 'group' ? 'is-active' : ''}
-                type="button"
-                onClick={() => openAdminPanel('group')}
-              >
-                단톡
-              </button>
-            </div>
-
-            {adminPanel === 'users' && (
-              <div className="managed-user-list">
-                {managedUsers.map((user) => (
-                  <article className="managed-user-row" key={user.id}>
-                    <span className="avatar small">{user.nickname.slice(0, 1)}</span>
-                    <div>
-                      <strong>{user.nickname}</strong>
-                      <span>{user.email || '이메일 없음'}</span>
-                      <small>
-                        {roleCopy[user.role]} · {statusCopy[user.status]}
-                      </small>
-                    </div>
-                    <div className="user-actions">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleUserRole(user)}
-                        disabled={user.id === authSession.uid}
-                      >
-                        권한
-                      </button>
-                      <button type="button" onClick={() => handleToggleUserStatus(user)}>
-                        {user.status === 'active' ? '차단' : '해제'}
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
-
-            {adminPanel === 'direct' && (
-              <form className="admin-form" onSubmit={handleCreateDirectChat}>
-                <label className="field">
-                  <span>대화할 유저</span>
-                  <select
-                    value={directTargetId || manageableUsers[0]?.id || ''}
-                    onChange={(event) => setDirectTargetId(event.target.value)}
-                    disabled={manageableUsers.length === 0}
-                  >
-                    {manageableUsers.map((user) => (
-                      <option key={user.id} value={user.id}>
-                        {user.nickname} · {roleCopy[user.role]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button className="primary-button" type="submit">
-                  1:1 대화 시작
-                </button>
-              </form>
-            )}
-
-            {adminPanel === 'group' && (
-              <form className="admin-form" onSubmit={handleCreateGroupChat}>
-                <label className="field">
-                  <span>단톡 이름</span>
-                  <div className="field-control">
-                    <MessageCircle size={18} />
-                    <input
-                      value={groupName}
-                      onChange={(event) => setGroupName(event.target.value)}
-                      placeholder="예: 신규 상담팀"
-                    />
-                  </div>
-                </label>
-                <div className="group-member-list">
-                  {manageableUsers.map((user) => (
-                    <label className="member-check" key={user.id}>
-                      <input
-                        type="checkbox"
-                        checked={selectedGroupMemberIds.includes(user.id)}
-                        onChange={() => toggleGroupMember(user.id)}
-                      />
-                      <span>{user.nickname}</span>
-                      <small>{statusCopy[user.status]}</small>
-                    </label>
-                  ))}
-                </div>
-                <button className="primary-button" type="submit">
-                  단톡 만들기
-                </button>
-              </form>
-            )}
-          </div>
+          renderAdminConsole('desktop')
         ) : (
           <div className="detail-section">
             <h3>권한</h3>

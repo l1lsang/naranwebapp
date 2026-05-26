@@ -66,13 +66,16 @@ service cloud.firestore {
       return request.resource.data.keys().hasOnly([
         'userId',
         'lastReadMessageId',
-        'updatedAt'
+        'updatedAt',
+        'expiresAt'
       ])
       && request.resource.data.userId == userId
       && request.resource.data.lastReadMessageId is string
       && request.resource.data.lastReadMessageId.size() > 0
       && request.resource.data.lastReadMessageId.size() <= 160
-      && request.resource.data.updatedAt == request.time;
+      && request.resource.data.updatedAt == request.time
+      && request.resource.data.expiresAt is timestamp
+      && request.resource.data.expiresAt > request.time;
     }
 
     function validMessageAttachment(roomId) {
@@ -142,6 +145,7 @@ service cloud.firestore {
           'subtitle',
           'status',
           'type',
+          'retentionPolicy',
           'participantIds',
           'createdBy',
           'createdAt',
@@ -154,6 +158,7 @@ service cloud.firestore {
         && request.resource.data.name.size() >= 2
         && request.resource.data.name.size() <= 40
         && request.resource.data.type in ['direct', 'group']
+        && request.resource.data.retentionPolicy in ['oneDay', 'oneMonth']
         && request.resource.data.participantIds is list
         && request.auth.uid in request.resource.data.participantIds;
 
@@ -184,7 +189,8 @@ service cloud.firestore {
             'authorName',
             'text',
             'attachment',
-            'createdAt'
+            'createdAt',
+            'expiresAt'
           ])
           && request.resource.data.roomId == roomId
           && request.resource.data.authorId == request.auth.uid
@@ -195,6 +201,8 @@ service cloud.firestore {
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 1000
           && request.resource.data.createdAt == request.time
+          && request.resource.data.expiresAt is timestamp
+          && request.resource.data.expiresAt > request.time
           && validMessageAttachment(roomId);
 
         allow update, delete: if false;

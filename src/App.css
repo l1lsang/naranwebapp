@@ -337,7 +337,8 @@ button:disabled {
 
 .mobile-tab-page,
 .mobile-tab-bar,
-.mobile-back-button {
+.mobile-back-button,
+.mobile-admin-console {
   display: none;
 }
 
@@ -517,7 +518,7 @@ h3 {
 
 .admin-quick-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -1157,7 +1158,7 @@ h3 {
   border-radius: 8px;
   background: #f3f6f5;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 4px;
   padding: 4px;
 }
@@ -1263,6 +1264,41 @@ h3 {
   overflow-y: auto;
   display: grid;
   gap: 6px;
+}
+
+.retention-options {
+  display: grid;
+  gap: 8px;
+}
+
+.retention-options button {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #ffffff;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  text-align: left;
+}
+
+.retention-options button.is-active {
+  border-color: rgba(6, 199, 85, 0.48);
+  background: #eef8f2;
+}
+
+.retention-options strong {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.retention-options small,
+.retention-note {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
 }
 
 .member-check {
@@ -1565,6 +1601,24 @@ h3 {
   .mobile-page-list {
     min-height: 0;
     flex: 1;
+  }
+
+  .mobile-admin-console {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #ffffff;
+    display: block;
+    padding: 12px;
+  }
+
+  .mobile-admin-console .admin-console {
+    padding-top: 0;
+  }
+
+  .mobile-admin-console .managed-user-list,
+  .mobile-admin-console .group-member-list {
+    max-height: 260px;
+    overflow-y: auto;
   }
 
   .conversation-panel {
