@@ -90,6 +90,9 @@ type AttachmentKind = 'image' | 'file'
 type MobileTab = 'friends' | 'chats' | 'news' | 'calls'
 type RetentionPolicy = 'oneDay' | 'oneMonth'
 type CallMode = 'voice' | 'video'
+type CallStatus = 'ringing' | 'accepted' | 'ended' | 'declined'
+type CallPhase = 'calling' | 'incoming' | 'connecting' | 'connected' | 'ended'
+type CandidateSide = 'callerCandidates' | 'calleeCandidates'
 
 type ParticipantProfile = {
   nickname: string
@@ -192,6 +195,29 @@ type StoredUserProfile = {
   photoPath?: unknown
 }
 
+type StoredCall = {
+  roomId?: unknown
+  callerId?: unknown
+  calleeId?: unknown
+  participantIds?: unknown
+  mode?: unknown
+  status?: unknown
+  offer?: unknown
+  answer?: unknown
+}
+
+type CallSignal = {
+  id: string
+  roomId: string
+  callerId: string
+  calleeId: string
+  participantIds: string[]
+  mode: CallMode
+  status: CallStatus
+  offer?: RTCSessionDescriptionInit
+  answer?: RTCSessionDescriptionInit
+}
+
 const timeFormatter = new Intl.DateTimeFormat('ko-KR', {
   hour: '2-digit',
   hour12: false,
@@ -223,9 +249,24 @@ const retentionDescription: Record<RetentionPolicy, string> = {
   oneMonth: '새 메시지와 파일은 30일 뒤 자동 삭제됩니다.',
 }
 
+const callPhaseCopy: Record<CallPhase, string> = {
+  calling: '상대에게 거는 중',
+  incoming: '수신 대기 중',
+  connecting: '연결 중',
+  connected: '연결됨',
+  ended: '종료됨',
+}
+
 const retentionDays: Record<RetentionPolicy, number> = {
   oneDay: 1,
   oneMonth: 30,
+}
+
+const rtcConfiguration: RTCConfiguration = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ],
 }
 
 const maxAttachmentBytes = 20 * 1024 * 1024
@@ -354,6 +395,78 @@ const normalizeParticipantProfiles = (profiles: unknown): Record<string, Partici
   }, {})
 }
 
+const normalizeSessionDescription = (
+  description: unknown,
+  expectedType: RTCSdpType,
+): RTCSessionDescriptionInit | undefined => {
+  if (!description || typeof description !== 'object' || Array.isArray(description)) {
+    return undefined
+  }
+
+  const data = description as Record<string, unknown>
+  const type: RTCSdpType | undefined = data.type === expectedType ? expectedType : undefined
+  const sdp = typeof data.sdp === 'string' ? data.sdp : ''
+
+  if (!type || !sdp) {
+    return undefined
+  }
+
+  return { type, sdp }
+}
+
+const normalizeCallSignal = (callId: string, data: StoredCall): CallSignal | undefined => {
+  const roomId = typeof data.roomId === 'string' ? data.roomId : ''
+  const callerId = typeof data.callerId === 'string' ? data.callerId : ''
+  const calleeId = typeof data.calleeId === 'string' ? data.calleeId : ''
+  const participantIds = Array.isArray(data.participantIds)
+    ? data.participantIds.filter((id): id is string => typeof id === 'string')
+    : []
+  const mode: CallMode = data.mode === 'video' ? 'video' : 'voice'
+  const status: CallStatus =
+    data.status === 'accepted' || data.status === 'ended' || data.status === 'declined'
+      ? data.status
+      : 'ringing'
+
+  if (!roomId || !callerId || !calleeId || participantIds.length === 0) {
+    return undefined
+  }
+
+  return {
+    id: callId,
+    roomId,
+    callerId,
+    calleeId,
+    participantIds,
+    mode,
+    status,
+    offer: normalizeSessionDescription(data.offer, 'offer'),
+    answer: normalizeSessionDescription(data.answer, 'answer'),
+  }
+}
+
+const serializeIceCandidate = (candidate: RTCIceCandidate) => ({
+  candidate: candidate.candidate,
+  sdpMid: candidate.sdpMid ?? '',
+  sdpMLineIndex: candidate.sdpMLineIndex ?? 0,
+})
+
+const normalizeIceCandidate = (candidate: Record<string, unknown>): RTCIceCandidateInit | undefined => {
+  const candidateText = typeof candidate.candidate === 'string' ? candidate.candidate : ''
+  const sdpMid = typeof candidate.sdpMid === 'string' ? candidate.sdpMid : ''
+  const sdpMLineIndex =
+    typeof candidate.sdpMLineIndex === 'number' ? candidate.sdpMLineIndex : 0
+
+  if (!candidateText) {
+    return undefined
+  }
+
+  return {
+    candidate: candidateText,
+    sdpMid,
+    sdpMLineIndex,
+  }
+}
+
 const getDirectPeerId = (room: ChatRoom | undefined, currentUserId: string | undefined) => {
   if (!room || room.type !== 'direct' || !currentUserId) {
     return ''
@@ -476,6 +589,13 @@ function App() {
   const [isRoomSettingsOpen, setIsRoomSettingsOpen] = useState(false)
   const [callMode, setCallMode] = useState<CallMode | null>(null)
   const [callRoomId, setCallRoomId] = useState('')
+  const [activeCallId, setActiveCallId] = useState('')
+  const [callPeerId, setCallPeerId] = useState('')
+  const [callPhase, setCallPhase] = useState<CallPhase>('ended')
+  const [callNotice, setCallNotice] = useState('')
+  const [incomingCall, setIncomingCall] = useState<CallSignal | null>(null)
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
   const [isMicMuted, setIsMicMuted] = useState(false)
   const [isCameraOff, setIsCameraOff] = useState(false)
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([])
@@ -494,6 +614,18 @@ function App() {
   const profileImageInputRef = useRef<HTMLInputElement | null>(null)
   const roomImageInputRef = useRef<HTMLInputElement | null>(null)
   const dragDepthRef = useRef(0)
+  const localStreamRef = useRef<MediaStream | null>(null)
+  const remoteStreamRef = useRef<MediaStream | null>(null)
+  const localVideoRef = useRef<HTMLVideoElement | null>(null)
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
+  const callDocUnsubscribeRef = useRef<(() => void) | null>(null)
+  const remoteCandidatesUnsubscribeRef = useRef<(() => void) | null>(null)
+  const processedCandidateIdsRef = useRef<Set<string>>(new Set())
+  const pendingLocalCandidatesRef = useRef<RTCIceCandidateInit[]>([])
+  const pendingRemoteCandidatesRef = useRef<RTCIceCandidateInit[]>([])
+  const isCallSignalReadyRef = useRef(false)
 
   const isAdmin = authSession?.role === 'admin'
   const canSendMessage =
@@ -661,6 +793,72 @@ function App() {
     () => chatRooms.reduce((total, room) => total + room.unread, 0),
     [chatRooms],
   )
+
+  useEffect(() => {
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = localStream
+    }
+  }, [localStream])
+
+  useEffect(() => {
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remoteStream
+    }
+
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = remoteStream
+    }
+  }, [remoteStream])
+
+  useEffect(() => {
+    localStream?.getAudioTracks().forEach((track) => {
+      track.enabled = !isMicMuted
+    })
+  }, [isMicMuted, localStream])
+
+  useEffect(() => {
+    localStream?.getVideoTracks().forEach((track) => {
+      track.enabled = !isCameraOff
+    })
+  }, [isCameraOff, localStream])
+
+  useEffect(() => {
+    if (
+      !authSession ||
+      authSession.role !== 'user' ||
+      !isFirebaseConfigured ||
+      !db ||
+      activeCallId ||
+      callMode
+    ) {
+      return
+    }
+
+    const incomingQuery = query(
+      collection(db, 'calls'),
+      where('calleeId', '==', authSession.uid),
+      where('status', '==', 'ringing'),
+      limit(1),
+    )
+
+    const unsubscribe = onSnapshot(
+      incomingQuery,
+      (snapshot) => {
+        const nextCall = snapshot.docs
+          .map((callDoc) =>
+            normalizeCallSignal(callDoc.id, callDoc.data() as StoredCall),
+          )
+          .find((call): call is CallSignal => Boolean(call?.offer))
+
+        setIncomingCall(nextCall ?? null)
+      },
+      () => {
+        setIncomingCall(null)
+      },
+    )
+
+    return unsubscribe
+  }, [activeCallId, authSession, callMode])
 
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) {
@@ -1379,6 +1577,7 @@ function App() {
     setIsSettingsSubmitting(true)
 
     try {
+      await closeCall(false)
       await reauthenticateCurrentUser(deletePassword)
 
       if (authSession.photoPath && fileStorage) {
@@ -1409,6 +1608,7 @@ function App() {
   }
 
   const handleLogout = async () => {
+    await closeCall(false)
     setRemoteMessages([])
     setReadReceipts([])
     setAuthError('')
@@ -1511,25 +1711,402 @@ function App() {
     setIsRoomSettingsOpen(false)
   }
 
-  const openCall = (mode: CallMode, roomId = activeRoomId) => {
+  const setLocalMediaStream = (stream: MediaStream | null) => {
+    localStreamRef.current = stream
+    setLocalStream(stream)
+  }
+
+  const setRemoteMediaStream = (stream: MediaStream | null) => {
+    remoteStreamRef.current = stream
+    setRemoteStream(stream)
+  }
+
+  const teardownCallResources = () => {
+    callDocUnsubscribeRef.current?.()
+    callDocUnsubscribeRef.current = null
+    remoteCandidatesUnsubscribeRef.current?.()
+    remoteCandidatesUnsubscribeRef.current = null
+    peerConnectionRef.current?.close()
+    peerConnectionRef.current = null
+    localStreamRef.current?.getTracks().forEach((track) => track.stop())
+    remoteStreamRef.current?.getTracks().forEach((track) => track.stop())
+    setLocalMediaStream(null)
+    setRemoteMediaStream(null)
+    processedCandidateIdsRef.current.clear()
+    pendingLocalCandidatesRef.current = []
+    pendingRemoteCandidatesRef.current = []
+    isCallSignalReadyRef.current = false
+  }
+
+  const resetCallState = () => {
+    teardownCallResources()
+    setCallMode(null)
+    setCallRoomId('')
+    setActiveCallId('')
+    setCallPeerId('')
+    setCallPhase('ended')
+    setCallNotice('')
+    setIncomingCall(null)
+    setIsMicMuted(false)
+    setIsCameraOff(false)
+  }
+
+  const getLocalCallStream = async (mode: CallMode) => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('Media devices are not available.')
+    }
+
+    return navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: mode === 'video',
+    })
+  }
+
+  const sendLocalCandidate = async (
+    callId: string,
+    side: CandidateSide,
+    candidate: RTCIceCandidateInit,
+  ) => {
+    if (!authSession || !db) {
+      return
+    }
+
+    await addDoc(collection(db, 'calls', callId, side), {
+      ...candidate,
+      createdBy: authSession.uid,
+      createdAt: serverTimestamp(),
+    })
+  }
+
+  const flushLocalCandidates = async (callId: string, side: CandidateSide) => {
+    isCallSignalReadyRef.current = true
+    const candidates = [...pendingLocalCandidatesRef.current]
+    pendingLocalCandidatesRef.current = []
+
+    await Promise.all(
+      candidates.map((candidate) => sendLocalCandidate(callId, side, candidate)),
+    )
+  }
+
+  const addRemoteCandidate = async (candidate: RTCIceCandidateInit) => {
+    const peerConnection = peerConnectionRef.current
+
+    if (!peerConnection) {
+      return
+    }
+
+    if (!peerConnection.remoteDescription) {
+      pendingRemoteCandidatesRef.current.push(candidate)
+      return
+    }
+
+    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => undefined)
+  }
+
+  const flushRemoteCandidates = async () => {
+    const candidates = [...pendingRemoteCandidatesRef.current]
+    pendingRemoteCandidatesRef.current = []
+
+    await Promise.all(candidates.map((candidate) => addRemoteCandidate(candidate)))
+  }
+
+  const subscribeRemoteCandidates = (callId: string, side: CandidateSide) => {
+    if (!db) {
+      return
+    }
+
+    remoteCandidatesUnsubscribeRef.current?.()
+    remoteCandidatesUnsubscribeRef.current = onSnapshot(
+      collection(db, 'calls', callId, side),
+      (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type !== 'added' || processedCandidateIdsRef.current.has(change.doc.id)) {
+            return
+          }
+
+          processedCandidateIdsRef.current.add(change.doc.id)
+          const candidate = normalizeIceCandidate(change.doc.data())
+
+          if (candidate) {
+            void addRemoteCandidate(candidate)
+          }
+        })
+      },
+      () => {
+        setCallNotice('통화 연결 후보를 불러오지 못했습니다.')
+      },
+    )
+  }
+
+  const createPeerConnection = (callId: string, side: CandidateSide) => {
+    const peerConnection = new RTCPeerConnection(rtcConfiguration)
+
+    peerConnection.onicecandidate = (event) => {
+      if (!event.candidate) {
+        return
+      }
+
+      const candidate = serializeIceCandidate(event.candidate)
+
+      if (!isCallSignalReadyRef.current) {
+        pendingLocalCandidatesRef.current.push(candidate)
+        return
+      }
+
+      void sendLocalCandidate(callId, side, candidate).catch(() => {
+        setCallNotice('통화 연결 정보를 보내지 못했습니다.')
+      })
+    }
+
+    peerConnection.ontrack = (event) => {
+      const [stream] = event.streams
+
+      if (stream) {
+        setRemoteMediaStream(stream)
+        return
+      }
+
+      const fallbackStream = remoteStreamRef.current ?? new MediaStream()
+      fallbackStream.addTrack(event.track)
+      setRemoteMediaStream(fallbackStream)
+    }
+
+    peerConnection.onconnectionstatechange = () => {
+      if (peerConnection.connectionState === 'connected') {
+        setCallPhase('connected')
+        setCallNotice('')
+      }
+
+      if (peerConnection.connectionState === 'failed') {
+        setCallNotice('통화 연결에 실패했습니다. 네트워크 상태를 확인해주세요.')
+      }
+
+      if (peerConnection.connectionState === 'disconnected') {
+        setCallNotice('상대 연결이 일시적으로 끊겼습니다.')
+      }
+    }
+
+    peerConnectionRef.current = peerConnection
+    return peerConnection
+  }
+
+  const watchCallDocument = (
+    callId: string,
+    onSignal: (signal: CallSignal) => void | Promise<void>,
+  ) => {
+    if (!db) {
+      return
+    }
+
+    callDocUnsubscribeRef.current?.()
+    callDocUnsubscribeRef.current = onSnapshot(
+      doc(db, 'calls', callId),
+      (snapshot) => {
+        const signal = snapshot.exists()
+          ? normalizeCallSignal(snapshot.id, snapshot.data() as StoredCall)
+          : undefined
+
+        if (!signal || signal.status === 'ended' || signal.status === 'declined') {
+          resetCallState()
+          return
+        }
+
+        void onSignal(signal)
+      },
+      () => {
+        setCallNotice('통화 상태를 불러오지 못했습니다.')
+      },
+    )
+  }
+
+  const closeCall = async (notifyRemote = true) => {
+    const callId = activeCallId
+
+    if (notifyRemote && callId && db) {
+      await setDoc(
+        doc(db, 'calls', callId),
+        {
+          status: 'ended',
+          updatedAt: serverTimestamp(),
+          endedAt: serverTimestamp(),
+        },
+        { merge: true },
+      ).catch(() => undefined)
+    }
+
+    resetCallState()
+  }
+
+  const openCall = async (mode: CallMode, roomId = activeRoomId) => {
     const targetRoom = chatRooms.find((room) => room.id === roomId)
+
+    if (!authSession || !db) {
+      setAdminNotice('통화 연결 상태를 확인해주세요.')
+      return
+    }
+
+    if (!isAdmin) {
+      setAdminNotice('일반 유저는 전화를 받을 수만 있습니다.')
+      return
+    }
 
     if (!targetRoom) {
       return
     }
 
+    if (targetRoom.type !== 'direct') {
+      setAdminNotice('실제 통화 연결은 1:1 대화방에서만 가능합니다.')
+      return
+    }
+
+    const calleeId = getDirectPeerId(targetRoom, authSession.uid)
+
+    if (!calleeId) {
+      setAdminNotice('전화를 받을 상대를 찾지 못했습니다.')
+      return
+    }
+
+    await closeCall(false)
+
+    const callRef = doc(collection(db, 'calls'))
+
     setActiveRoomId(targetRoom.id)
     setCallRoomId(targetRoom.id)
+    setActiveCallId(callRef.id)
+    setCallPeerId(calleeId)
     setCallMode(mode)
+    setCallPhase('calling')
+    setCallNotice('상대에게 연결 요청을 보내는 중입니다.')
     setIsMicMuted(false)
     setIsCameraOff(mode === 'voice')
+
+    try {
+      const stream = await getLocalCallStream(mode)
+      const peerConnection = createPeerConnection(callRef.id, 'callerCandidates')
+
+      setLocalMediaStream(stream)
+      stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream))
+
+      const offer = await peerConnection.createOffer()
+      await peerConnection.setLocalDescription(offer)
+      await setDoc(callRef, {
+        roomId: targetRoom.id,
+        callerId: authSession.uid,
+        calleeId,
+        participantIds: [authSession.uid, calleeId],
+        mode,
+        status: 'ringing',
+        offer: {
+          type: offer.type,
+          sdp: offer.sdp ?? '',
+        },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+      await flushLocalCandidates(callRef.id, 'callerCandidates')
+      subscribeRemoteCandidates(callRef.id, 'calleeCandidates')
+      watchCallDocument(callRef.id, async (signal) => {
+        if (
+          signal.status === 'accepted' &&
+          signal.answer &&
+          !peerConnection.remoteDescription
+        ) {
+          setCallPhase('connecting')
+          setCallNotice('상대가 전화를 받았습니다. 연결 중입니다.')
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.answer))
+          await flushRemoteCandidates()
+        }
+      })
+    } catch {
+      setAdminNotice('통화를 시작하지 못했습니다. 마이크/카메라 권한을 확인해주세요.')
+      resetCallState()
+    }
   }
 
-  const closeCall = () => {
-    setCallMode(null)
-    setCallRoomId('')
+  const declineIncomingCall = async () => {
+    if (!incomingCall || !db) {
+      setIncomingCall(null)
+      return
+    }
+
+    await setDoc(
+      doc(db, 'calls', incomingCall.id),
+      {
+        status: 'declined',
+        updatedAt: serverTimestamp(),
+        endedAt: serverTimestamp(),
+      },
+      { merge: true },
+    ).catch(() => undefined)
+    setIncomingCall(null)
+  }
+
+  const acceptIncomingCall = async () => {
+    if (!incomingCall || !incomingCall.offer || !authSession || !db) {
+      return
+    }
+
+    const targetRoom = chatRooms.find((room) => room.id === incomingCall.roomId)
+
+    await closeCall(false)
+    setIncomingCall(null)
+    setActiveRoomId(incomingCall.roomId)
+    setCallRoomId(incomingCall.roomId)
+    setActiveCallId(incomingCall.id)
+    setCallPeerId(incomingCall.callerId)
+    setCallMode(incomingCall.mode)
+    setCallPhase('incoming')
+    setCallNotice('전화를 받는 중입니다.')
     setIsMicMuted(false)
-    setIsCameraOff(false)
+    setIsCameraOff(incomingCall.mode === 'voice')
+
+    try {
+      const stream = await getLocalCallStream(incomingCall.mode)
+      const peerConnection = createPeerConnection(incomingCall.id, 'calleeCandidates')
+
+      setLocalMediaStream(stream)
+      stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream))
+      isCallSignalReadyRef.current = true
+      subscribeRemoteCandidates(incomingCall.id, 'callerCandidates')
+      await peerConnection.setRemoteDescription(
+        new RTCSessionDescription(incomingCall.offer),
+      )
+      await flushRemoteCandidates()
+      const answer = await peerConnection.createAnswer()
+      await peerConnection.setLocalDescription(answer)
+      await setDoc(
+        doc(db, 'calls', incomingCall.id),
+        {
+          status: 'accepted',
+          answer: {
+            type: answer.type,
+            sdp: answer.sdp ?? '',
+          },
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      )
+      await flushLocalCandidates(incomingCall.id, 'calleeCandidates')
+      setCallPhase('connecting')
+      setCallNotice('연결 중입니다.')
+      watchCallDocument(incomingCall.id, () => undefined)
+      if (targetRoom) {
+        setMobileTab('chats')
+        setIsMobileChatOpen(true)
+      }
+    } catch {
+      await setDoc(
+        doc(db, 'calls', incomingCall.id),
+        {
+          status: 'declined',
+          updatedAt: serverTimestamp(),
+          endedAt: serverTimestamp(),
+        },
+        { merge: true },
+      ).catch(() => undefined)
+      setAdminNotice('전화를 받을 수 없습니다. 마이크/카메라 권한을 확인해주세요.')
+      resetCallState()
+    }
   }
 
   const handleCreateDirectChat = async (event: FormEvent<HTMLFormElement>) => {
@@ -2700,12 +3277,54 @@ function App() {
     )
   }
 
+  const renderIncomingCallDialog = () => {
+    if (!incomingCall) {
+      return null
+    }
+
+    const incomingRoom = chatRooms.find((room) => room.id === incomingCall.roomId)
+    const callerProfile =
+      userProfileById[incomingCall.callerId] ?? incomingRoom?.participantProfiles[incomingCall.callerId]
+    const callerName = callerProfile?.nickname ?? '관리자'
+    const callTitle = incomingCall.mode === 'video' ? '영상통화' : '음성 채팅'
+
+    return (
+      <div className="call-backdrop" role="presentation">
+        <section className="incoming-call-dialog" aria-label="수신 전화">
+          <div className="incoming-call-profile">
+            {renderUserAvatar(callerName, callerProfile?.photoURL ?? '', 'call-avatar')}
+            <div>
+              <p className="eyebrow">GreenTalk Call</p>
+              <h2>전화가 왔습니다</h2>
+              <span>
+                {callerName} · {callTitle}
+              </span>
+            </div>
+          </div>
+          <div className="incoming-call-actions">
+            <button className="is-danger" type="button" onClick={() => void declineIncomingCall()}>
+              <PhoneOff size={20} />
+              거절
+            </button>
+            <button type="button" onClick={() => void acceptIncomingCall()}>
+              {incomingCall.mode === 'video' ? <Video size={20} /> : <Phone size={20} />}
+              받기
+            </button>
+          </div>
+        </section>
+      </div>
+    )
+  }
+
   const renderCallDialog = () => {
     if (!callMode || !callRoom) {
       return null
     }
 
     const display = getRoomDisplay(callRoom)
+    const peerProfile =
+      userProfileById[callPeerId] ?? callRoom.participantProfiles[callPeerId]
+    const peerName = peerProfile?.nickname ?? display.name
     const isVideoCall = callMode === 'video'
     const callTitle = isVideoCall ? '영상통화' : '음성 채팅'
 
@@ -2716,9 +3335,16 @@ function App() {
             <div>
               <p className="eyebrow">GreenTalk Call</p>
               <h2>{callTitle}</h2>
-              <span>{display.name}</span>
+              <span>
+                {peerName} · {callPhaseCopy[callPhase]}
+              </span>
             </div>
-            <button className="icon-button" type="button" onClick={closeCall} aria-label="닫기">
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => void closeCall()}
+              aria-label="닫기"
+            >
               <X size={20} />
             </button>
           </header>
@@ -2726,38 +3352,39 @@ function App() {
           {isVideoCall ? (
             <div className="video-call-stage">
               <div className="video-tile is-main">
-                {isCameraOff ? (
-                  <>
-                    {renderRoomAvatar(callRoom, 'call-avatar')}
-                    <strong>{display.name}</strong>
-                  </>
+                {remoteStream ? (
+                  <video ref={remoteVideoRef} autoPlay playsInline />
                 ) : (
                   <>
-                    <Video size={38} />
-                    <strong>{display.name}</strong>
+                    {renderUserAvatar(peerName, peerProfile?.photoURL ?? '', 'call-avatar')}
+                    <strong>{peerName}</strong>
                   </>
+                )}
+                {!remoteStream && (
+                  <span className="call-stage-status">{callPhaseCopy[callPhase]}</span>
                 )}
               </div>
               <div className="video-tile is-self">
-                {isCameraOff ? (
-                  <VideoOff size={24} />
+                {localStream && !isCameraOff ? (
+                  <video ref={localVideoRef} autoPlay muted playsInline />
                 ) : (
-                  renderUserAvatar(
-                    authSession?.nickname ?? '나',
-                    authSession?.photoURL ?? '',
-                    'call-self-avatar',
-                  )
+                  <>
+                    <VideoOff size={24} />
+                    <span>나</span>
+                  </>
                 )}
-                <span>나</span>
               </div>
             </div>
           ) : (
             <div className="voice-call-stage">
-              {renderRoomAvatar(callRoom, 'call-avatar')}
-              <strong>{display.name}</strong>
-              <span>음성 채팅</span>
+              <audio ref={remoteAudioRef} autoPlay />
+              {renderUserAvatar(peerName, peerProfile?.photoURL ?? '', 'call-avatar')}
+              <strong>{peerName}</strong>
+              <span>{callPhaseCopy[callPhase]}</span>
             </div>
           )}
+
+          {callNotice && <p className="call-notice">{callNotice}</p>}
 
           <div className="call-controls">
             <button
@@ -2782,7 +3409,7 @@ function App() {
                 <span>{isCameraOff ? '카메라 꺼짐' : '카메라'}</span>
               </button>
             )}
-            <button className="is-danger" type="button" onClick={closeCall}>
+            <button className="is-danger" type="button" onClick={() => void closeCall()}>
               <PhoneOff size={20} />
               <span>종료</span>
             </button>
@@ -3055,7 +3682,12 @@ function App() {
                       type="button"
                       onClick={() => openCall('voice', room.id)}
                       aria-label={`${display.name} 음성 채팅`}
-                      title="음성 채팅"
+                      title={
+                        isAdmin && room.type === 'direct'
+                          ? '음성 채팅'
+                          : '관리자만 1:1 통화를 걸 수 있음'
+                      }
+                      disabled={!isAdmin || room.type !== 'direct'}
                     >
                       <Phone size={18} />
                     </button>
@@ -3063,7 +3695,12 @@ function App() {
                       type="button"
                       onClick={() => openCall('video', room.id)}
                       aria-label={`${display.name} 영상통화`}
-                      title="영상통화"
+                      title={
+                        isAdmin && room.type === 'direct'
+                          ? '영상통화'
+                          : '관리자만 1:1 통화를 걸 수 있음'
+                      }
+                      disabled={!isAdmin || room.type !== 'direct'}
                     >
                       <Video size={18} />
                     </button>
@@ -3122,8 +3759,12 @@ function App() {
               type="button"
               onClick={() => openCall('voice')}
               aria-label="음성 통화"
-              title="음성 통화"
-              disabled={!activeRoom}
+              title={
+                isAdmin && activeRoom?.type === 'direct'
+                  ? '음성 통화'
+                  : '관리자만 1:1 통화를 걸 수 있음'
+              }
+              disabled={!activeRoom || !isAdmin || activeRoom.type !== 'direct'}
             >
               <Phone size={19} />
             </button>
@@ -3132,8 +3773,12 @@ function App() {
               type="button"
               onClick={() => openCall('video')}
               aria-label="영상 통화"
-              title="영상 통화"
-              disabled={!activeRoom}
+              title={
+                isAdmin && activeRoom?.type === 'direct'
+                  ? '영상 통화'
+                  : '관리자만 1:1 통화를 걸 수 있음'
+              }
+              disabled={!activeRoom || !isAdmin || activeRoom.type !== 'direct'}
             >
               <Video size={19} />
             </button>
@@ -3323,8 +3968,12 @@ function App() {
               type="button"
               onClick={() => openCall('voice')}
               aria-label="음성 채팅"
-              title="음성 채팅"
-              disabled={!activeRoom}
+              title={
+                isAdmin && activeRoom?.type === 'direct'
+                  ? '음성 채팅'
+                  : '관리자만 1:1 통화를 걸 수 있음'
+              }
+              disabled={!activeRoom || !isAdmin || activeRoom.type !== 'direct'}
             >
               <Phone size={18} />
             </button>
@@ -3332,8 +3981,12 @@ function App() {
               type="button"
               onClick={() => openCall('video')}
               aria-label="영상통화"
-              title="영상통화"
-              disabled={!activeRoom}
+              title={
+                isAdmin && activeRoom?.type === 'direct'
+                  ? '영상통화'
+                  : '관리자만 1:1 통화를 걸 수 있음'
+              }
+              disabled={!activeRoom || !isAdmin || activeRoom.type !== 'direct'}
             >
               <Video size={18} />
             </button>
@@ -3408,6 +4061,7 @@ function App() {
       />
 
       {renderRoomSettingsDialog()}
+      {renderIncomingCallDialog()}
       {renderCallDialog()}
 
       {isSettingsOpen && (

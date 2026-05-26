@@ -20,6 +20,10 @@ service cloud.firestore {
       return /databases/$(database)/documents/rooms/$(roomId);
     }
 
+    function callDoc(callId) {
+      return /databases/$(database)/documents/calls/$(callId);
+    }
+
     function hasParticipant(participantIds) {
       return participantIds is list
         && request.auth.uid in participantIds;
@@ -155,6 +159,105 @@ service cloud.firestore {
         );
     }
 
+    function validSessionDescription(descriptionType, description) {
+      return description is map
+        && description.keys().hasOnly(['type', 'sdp'])
+        && description.type == descriptionType
+        && description.sdp is string
+        && description.sdp.size() > 0
+        && description.sdp.size() <= 200000;
+    }
+
+    function validCallCreate() {
+      return request.resource.data.keys().hasOnly([
+        'roomId',
+        'callerId',
+        'calleeId',
+        'participantIds',
+        'mode',
+        'status',
+        'offer',
+        'createdAt',
+        'updatedAt'
+      ])
+      && request.resource.data.roomId is string
+      && exists(roomDoc(request.resource.data.roomId))
+      && get(roomDoc(request.resource.data.roomId)).data.type == 'direct'
+      && request.resource.data.callerId == request.auth.uid
+      && request.resource.data.calleeId is string
+      && request.resource.data.calleeId != request.auth.uid
+      && request.auth.uid in get(roomDoc(request.resource.data.roomId)).data.participantIds
+      && request.resource.data.calleeId in get(roomDoc(request.resource.data.roomId)).data.participantIds
+      && request.resource.data.participantIds is list
+      && request.resource.data.participantIds.size() == 2
+      && request.auth.uid in request.resource.data.participantIds
+      && request.resource.data.calleeId in request.resource.data.participantIds
+      && request.resource.data.mode in ['voice', 'video']
+      && request.resource.data.status == 'ringing'
+      && validSessionDescription('offer', request.resource.data.offer)
+      && request.resource.data.createdAt == request.time
+      && request.resource.data.updatedAt == request.time;
+    }
+
+    function validCallAnswer() {
+      return request.auth.uid == resource.data.calleeId
+        && resource.data.status == 'ringing'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'answer',
+          'updatedAt'
+        ])
+        && request.resource.data.status == 'accepted'
+        && validSessionDescription('answer', request.resource.data.answer)
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    function validCallEnd() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'status',
+        'updatedAt',
+        'endedAt'
+      ])
+      && request.resource.data.status in ['ended', 'declined']
+      && (
+        request.resource.data.status == 'ended'
+        || request.auth.uid == resource.data.calleeId
+      )
+      && request.resource.data.updatedAt == request.time
+      && request.resource.data.endedAt == request.time;
+    }
+
+    function validCallCandidate(callId, candidateSide) {
+      return exists(callDoc(callId))
+        && candidateSide in ['callerCandidates', 'calleeCandidates']
+        && request.resource.data.keys().hasOnly([
+          'candidate',
+          'sdpMid',
+          'sdpMLineIndex',
+          'createdBy',
+          'createdAt'
+        ])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.candidate is string
+        && request.resource.data.candidate.size() > 0
+        && request.resource.data.candidate.size() <= 4096
+        && request.resource.data.sdpMid is string
+        && request.resource.data.sdpMid.size() <= 120
+        && request.resource.data.sdpMLineIndex is int
+        && request.resource.data.sdpMLineIndex >= 0
+        && (
+          (
+            candidateSide == 'callerCandidates'
+            && request.auth.uid == get(callDoc(callId)).data.callerId
+          )
+          || (
+            candidateSide == 'calleeCandidates'
+            && request.auth.uid == get(callDoc(callId)).data.calleeId
+          )
+        );
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
 
@@ -177,6 +280,40 @@ service cloud.firestore {
         );
 
       allow delete: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /calls/{callId} {
+      allow read: if signedIn()
+        && (
+          request.auth.uid == resource.data.callerId
+          || request.auth.uid == resource.data.calleeId
+        );
+
+      allow create: if isAdmin()
+        && validCallCreate();
+
+      allow update: if signedIn()
+        && (
+          request.auth.uid == resource.data.callerId
+          || request.auth.uid == resource.data.calleeId
+        )
+        && (validCallAnswer() || validCallEnd());
+
+      allow delete: if false;
+
+      match /{candidateSide}/{candidateId} {
+        allow read: if signedIn()
+          && exists(callDoc(callId))
+          && (
+            request.auth.uid == get(callDoc(callId)).data.callerId
+            || request.auth.uid == get(callDoc(callId)).data.calleeId
+          );
+
+        allow create: if signedIn()
+          && validCallCandidate(callId, candidateSide);
+
+        allow update, delete: if false;
+      }
     }
 
     match /rooms/{roomId} {
