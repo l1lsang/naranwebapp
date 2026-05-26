@@ -893,15 +893,8 @@ function App() {
       pressedPrivacyKeys.delete(key)
     }
 
-    const handleFocusLoss = () => {
+    const handleWindowBlur = () => {
       pressedPrivacyKeys.clear()
-      showShield(isMobileDevice() ? '모바일 캡처 보호 화면' : '캡처 보호 화면')
-    }
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') {
-        handleFocusLoss()
-      }
     }
 
     const handlePrint = () => {
@@ -910,17 +903,15 @@ function App() {
 
     window.addEventListener('keydown', handleCaptureKeyDown, true)
     window.addEventListener('keyup', handleCaptureKeyUp, true)
-    window.addEventListener('blur', handleFocusLoss)
+    window.addEventListener('blur', handleWindowBlur)
     window.addEventListener('beforeprint', handlePrint)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       pressedPrivacyKeys.clear()
       window.removeEventListener('keydown', handleCaptureKeyDown, true)
       window.removeEventListener('keyup', handleCaptureKeyUp, true)
-      window.removeEventListener('blur', handleFocusLoss)
+      window.removeEventListener('blur', handleWindowBlur)
       window.removeEventListener('beforeprint', handlePrint)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [authSession])
 
