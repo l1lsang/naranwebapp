@@ -20,10 +20,15 @@ service cloud.firestore {
       return /databases/$(database)/documents/rooms/$(roomId);
     }
 
+    function hasParticipant(participantIds) {
+      return participantIds is list
+        && request.auth.uid in participantIds;
+    }
+
     function isRoomParticipant(roomId) {
       return signedIn()
         && exists(roomDoc(roomId))
-        && request.auth.uid in get(roomDoc(roomId)).data.participantIds;
+        && hasParticipant(get(roomDoc(roomId)).data.participantIds);
     }
 
     function validUserProfile(userId) {
@@ -175,8 +180,10 @@ service cloud.firestore {
     }
 
     match /rooms/{roomId} {
-      allow read: if signedIn()
-        && (isAdmin() || isRoomParticipant(roomId));
+      allow list: if signedIn();
+
+      allow get: if signedIn()
+        && (isAdmin() || hasParticipant(resource.data.participantIds));
 
       allow create: if isAdmin()
         && request.resource.data.keys().hasOnly([

@@ -63,7 +63,6 @@ import {
   serverTimestamp,
   setDoc,
   Timestamp,
-  where,
 } from 'firebase/firestore'
 import {
   deleteObject,
@@ -562,43 +561,40 @@ function App() {
       return
     }
 
-    const roomsQuery =
-      authSession.role === 'admin'
-        ? query(collection(db, 'rooms'), limit(80))
-        : query(
-            collection(db, 'rooms'),
-            where('participantIds', 'array-contains', authSession.uid),
-            limit(80),
-          )
+    const roomsQuery = query(collection(db, 'rooms'), limit(120))
 
     const unsubscribe = onSnapshot(
       roomsQuery,
       (snapshot) => {
-        const remoteRooms: ChatRoom[] = snapshot.docs.map((roomDoc, index) => {
-          const data = roomDoc.data() as StoredRoom
-          const participantIds = Array.isArray(data.participantIds)
-            ? data.participantIds.filter((id): id is string => typeof id === 'string')
-            : []
-          const type: RoomType = data.type === 'direct' ? 'direct' : 'group'
+        const remoteRooms: ChatRoom[] = snapshot.docs
+          .map((roomDoc, index) => {
+            const data = roomDoc.data() as StoredRoom
+            const participantIds = Array.isArray(data.participantIds)
+              ? data.participantIds.filter((id): id is string => typeof id === 'string')
+              : []
+            const type: RoomType = data.type === 'direct' ? 'direct' : 'group'
 
-          return {
-            id: roomDoc.id,
-            name: typeof data.name === 'string' ? data.name : '새 채팅방',
-            subtitle:
-              typeof data.subtitle === 'string'
-                ? data.subtitle
-                : type === 'direct'
-                  ? '관리자가 시작한 1:1 대화'
-                  : '관리자가 만든 단톡방',
-            members: `${Math.max(participantIds.length, 1)}명`,
-            unread: 0,
-            accent: getRoomAccent(index + 1),
-            status: typeof data.status === 'string' ? data.status : '대화 가능',
-            type,
-            retentionPolicy: normalizeRetentionPolicy(data.retentionPolicy),
-            participantIds,
-          }
-        })
+            return {
+              id: roomDoc.id,
+              name: typeof data.name === 'string' ? data.name : '새 채팅방',
+              subtitle:
+                typeof data.subtitle === 'string'
+                  ? data.subtitle
+                  : type === 'direct'
+                    ? '관리자가 시작한 1:1 대화'
+                    : '관리자가 만든 단톡방',
+              members: `${Math.max(participantIds.length, 1)}명`,
+              unread: 0,
+              accent: getRoomAccent(index + 1),
+              status: typeof data.status === 'string' ? data.status : '대화 가능',
+              type,
+              retentionPolicy: normalizeRetentionPolicy(data.retentionPolicy),
+              participantIds,
+            }
+          })
+          .filter(
+            (room) => authSession.role === 'admin' || room.participantIds?.includes(authSession.uid),
+          )
 
         setChatRooms(remoteRooms)
 
