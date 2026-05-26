@@ -7,7 +7,8 @@
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -407,8 +408,25 @@ h3 {
 .signed-user {
   margin-top: 6px;
   color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   font-weight: 800;
+}
+
+.role-pill {
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: #416057;
+  background: #eef8f2;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.role-pill.is-admin {
+  color: #ffffff;
+  background: #12342d;
 }
 
 .icon-button {
@@ -502,6 +520,49 @@ h3 {
 
 .status-light.is-error {
   background: #ff5b4a;
+}
+
+.admin-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.admin-quick-actions button {
+  min-width: 0;
+  min-height: 38px;
+  border-radius: 8px;
+  color: var(--ink);
+  background: #eef8f2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.admin-quick-actions button:hover {
+  background: #dcf4e5;
+}
+
+.permission-note,
+.admin-notice {
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.permission-note {
+  color: #416057;
+  background: #eef8f2;
+}
+
+.admin-notice {
+  color: #5a5142;
+  background: #fff7e6;
 }
 
 .room-list {
@@ -784,6 +845,11 @@ h3 {
   background: #ffffff;
 }
 
+.composer input:disabled {
+  color: #8d9994;
+  background: #eef3f0;
+}
+
 .composer .send-button {
   color: #ffffff;
   background: var(--line-green);
@@ -841,6 +907,159 @@ h3 {
   padding-top: 24px;
 }
 
+.admin-console {
+  display: grid;
+  gap: 14px;
+  padding-top: 22px;
+}
+
+.admin-tabs {
+  min-height: 40px;
+  border-radius: 8px;
+  background: #f3f6f5;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+}
+
+.admin-tabs button {
+  min-width: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.admin-tabs button.is-active {
+  color: #ffffff;
+  background: #12342d;
+}
+
+.managed-user-list {
+  display: grid;
+  gap: 8px;
+}
+
+.managed-user-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 9px;
+  padding: 10px;
+}
+
+.managed-user-row div {
+  min-width: 0;
+}
+
+.managed-user-row strong,
+.managed-user-row span,
+.managed-user-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.managed-user-row strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.managed-user-row span,
+.managed-user-row small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.user-actions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.user-actions button {
+  min-height: 32px;
+  border-radius: 7px;
+  color: var(--ink);
+  background: #f3f6f5;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.user-actions button:hover {
+  background: #eef8f2;
+}
+
+.admin-form {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-form select {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: 0;
+  color: var(--ink);
+  background: #ffffff;
+  padding: 0 12px;
+}
+
+.admin-form select:focus {
+  border-color: rgba(6, 199, 85, 0.46);
+  box-shadow: 0 0 0 4px rgba(6, 199, 85, 0.1);
+}
+
+.group-member-list {
+  max-height: 210px;
+  overflow-y: auto;
+  display: grid;
+  gap: 6px;
+}
+
+.member-check {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.member-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--line-green);
+}
+
+.member-check span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.member-check small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .pinned-item {
   width: 100%;
   min-height: 44px;
@@ -860,6 +1079,10 @@ h3 {
 .pinned-item svg {
   flex: 0 0 auto;
   color: var(--line-green);
+}
+
+.pinned-item.is-locked svg {
+  color: #a4aea9;
 }
 
 @media (max-width: 1120px) {

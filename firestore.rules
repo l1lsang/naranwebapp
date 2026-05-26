@@ -2,36 +2,123 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function currentUserDoc() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(currentUserDoc())
+        && get(currentUserDoc()).data.role == 'admin';
+    }
+
+    function isDefaultRoom(roomId) {
+      return roomId in ['crew', 'design', 'support'];
+    }
+
+    function roomDoc(roomId) {
+      return /databases/$(database)/documents/rooms/$(roomId);
+    }
+
+    function isRoomParticipant(roomId) {
+      return signedIn()
+        && exists(roomDoc(roomId))
+        && request.auth.uid in get(roomDoc(roomId)).data.participantIds;
+    }
+
+    function validUserProfile(userId) {
+      return request.resource.data.keys().hasOnly([
+        'uid',
+        'email',
+        'nickname',
+        'role',
+        'status',
+        'thirdPartyConsent',
+        'thirdPartyConsentAt',
+        'createdAt',
+        'updatedAt'
+      ])
+      && request.resource.data.uid == userId
+      && request.resource.data.nickname is string
+      && request.resource.data.nickname.size() >= 2
+      && request.resource.data.nickname.size() <= 24
+      && request.resource.data.role in ['user', 'admin']
+      && request.resource.data.status in ['active', 'blocked'];
+    }
+
     match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow create, update: if request.auth != null
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+
+      allow create: if signedIn()
         && request.auth.uid == userId
-        && request.resource.data.keys().hasOnly([
-          'uid',
-          'email',
-          'nickname',
-          'thirdPartyConsent',
-          'thirdPartyConsentAt',
-          'createdAt',
-          'updatedAt'
-        ])
-        && request.resource.data.uid == userId
-        && request.resource.data.nickname is string
-        && request.resource.data.nickname.size() >= 2
-        && request.resource.data.nickname.size() <= 24;
+        && validUserProfile(userId)
+        && request.resource.data.role == 'user'
+        && request.resource.data.status == 'active';
+
+      allow update: if signedIn()
+        && (
+          (
+            request.auth.uid == userId
+            && validUserProfile(userId)
+            && request.resource.data.role == resource.data.role
+            && request.resource.data.status == resource.data.status
+          )
+          || (
+            isAdmin()
+            && validUserProfile(userId)
+          )
+        );
+
       allow delete: if false;
     }
 
-    match /rooms/{roomId}/messages/{messageId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null
-        && request.resource.data.roomId == roomId
-        && request.resource.data.authorId == request.auth.uid
-        && request.resource.data.text is string
-        && request.resource.data.text.size() > 0
-        && request.resource.data.text.size() <= 1000
-        && request.resource.data.createdAt == request.time;
-      allow update, delete: if false;
+    match /rooms/{roomId} {
+      allow read: if signedIn()
+        && (isAdmin() || isDefaultRoom(roomId) || isRoomParticipant(roomId));
+
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'name',
+          'subtitle',
+          'status',
+          'type',
+          'participantIds',
+          'createdBy',
+          'createdAt',
+          'updatedAt'
+        ])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.type in ['direct', 'group']
+        && request.resource.data.participantIds is list
+        && request.auth.uid in request.resource.data.participantIds;
+
+      allow update: if isAdmin();
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if signedIn()
+          && (isAdmin() || isDefaultRoom(roomId) || isRoomParticipant(roomId));
+
+        allow create: if signedIn()
+          && (isAdmin() || isDefaultRoom(roomId) || isRoomParticipant(roomId))
+          && request.resource.data.roomId == roomId
+          && request.resource.data.authorId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.createdAt == request.time;
+
+        allow update, delete: if false;
+      }
     }
   }
 }

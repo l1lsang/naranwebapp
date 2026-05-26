@@ -24,7 +24,11 @@ VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
 ```
 
-사용자 프로필과 동의 기록은 `users/{uid}` 문서에 저장됩니다. 메시지는 `rooms/{roomId}/messages` 하위 컬렉션에 저장됩니다.
+사용자 프로필과 동의 기록은 `users/{uid}` 문서에 저장됩니다. 신규 가입자는 기본 `role: "user"`로 생성됩니다.
+
+관리자 계정은 Firebase 콘솔에서 해당 `users/{uid}` 문서의 `role`을 `"admin"`으로 바꿔서 지정합니다. 관리자만 유저 목록 조회, 유저 상태/권한 변경, 1:1 대화 시작, 단톡방 생성이 가능합니다.
+
+메시지는 `rooms/{roomId}/messages` 하위 컬렉션에 저장됩니다. 일반 유저는 기본 채팅방 또는 본인이 `participantIds`에 포함된 방에서만 메시지를 보낼 수 있습니다.
 
 ## Vercel 배포
 
@@ -32,4 +36,4 @@ Vercel 프로젝트의 Environment Variables에 위 `VITE_FIREBASE_*` 값을 추
 
 ## Firestore Rules
 
-초기 규칙은 `firestore.rules`에 있습니다. 로그인한 사용자는 본인 프로필을 만들고 읽을 수 있으며, 메시지는 생성과 읽기만 허용됩니다. 수정과 삭제는 막아두었습니다.
+초기 규칙은 `firestore.rules`에 있습니다. 일반 유저는 새 채팅방을 만들 수 없고, 관리자는 `rooms` 문서를 생성해 1:1 또는 단톡을 시작할 수 있습니다. 메시지 수정과 삭제는 막아두었습니다.

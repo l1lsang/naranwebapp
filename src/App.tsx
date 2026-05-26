@@ -41,6 +41,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  where,
   type Timestamp,
 } from 'firebase/firestore'
 import { auth, db, isFirebaseConfigured } from './lib/firebase'
@@ -48,12 +49,26 @@ import './App.css'
 
 type AuthMode = 'login' | 'signup' | 'reset'
 type ConnectionState = 'demo' | 'connecting' | 'live' | 'error'
+type UserRole = 'user' | 'admin'
+type UserStatus = 'active' | 'blocked'
+type AdminPanel = 'users' | 'direct' | 'group'
+type RoomType = 'group' | 'direct'
 
 type AuthSession = {
   uid: string
   email: string
   nickname: string
+  role: UserRole
+  status: UserStatus
   isDemo: boolean
+}
+
+type ManagedUser = {
+  id: string
+  email: string
+  nickname: string
+  role: UserRole
+  status: UserStatus
 }
 
 type ChatRoom = {
@@ -64,6 +79,8 @@ type ChatRoom = {
   unread: number
   accent: string
   status: string
+  type: RoomType
+  participantIds?: string[]
 }
 
 type ChatMessage = {
@@ -84,11 +101,22 @@ type StoredMessage = {
   createdAt?: Timestamp
 }
 
-type StoredUserProfile = {
-  nickname?: unknown
+type StoredRoom = {
+  name?: unknown
+  subtitle?: unknown
+  status?: unknown
+  type?: unknown
+  participantIds?: unknown
 }
 
-const rooms: ChatRoom[] = [
+type StoredUserProfile = {
+  email?: unknown
+  nickname?: unknown
+  role?: unknown
+  status?: unknown
+}
+
+const initialRooms: ChatRoom[] = [
   {
     id: 'crew',
     name: '프로젝트 크루',
@@ -97,6 +125,7 @@ const rooms: ChatRoom[] = [
     unread: 3,
     accent: '#06c755',
     status: '작업 중',
+    type: 'group',
   },
   {
     id: 'design',
@@ -106,6 +135,7 @@ const rooms: ChatRoom[] = [
     unread: 0,
     accent: '#4f7cff',
     status: '검토',
+    type: 'group',
   },
   {
     id: 'support',
@@ -115,6 +145,38 @@ const rooms: ChatRoom[] = [
     unread: 6,
     accent: '#ffb224',
     status: '대기',
+    type: 'group',
+  },
+]
+
+const demoUsers: ManagedUser[] = [
+  {
+    id: 'demo-admin',
+    email: 'admin@greentalk.local',
+    nickname: '운영자',
+    role: 'admin',
+    status: 'active',
+  },
+  {
+    id: 'minseo',
+    email: 'minseo@example.com',
+    nickname: '민서',
+    role: 'user',
+    status: 'active',
+  },
+  {
+    id: 'jiwoo',
+    email: 'jiwoo@example.com',
+    nickname: '지우',
+    role: 'user',
+    status: 'active',
+  },
+  {
+    id: 'harin',
+    email: 'harin@example.com',
+    nickname: '하린',
+    role: 'user',
+    status: 'blocked',
   },
 ]
 
@@ -125,7 +187,7 @@ const demoMessages: Record<string, ChatMessage[]> = {
       roomId: 'crew',
       author: '민서',
       authorId: 'minseo',
-      text: '오늘은 채팅 MVP 먼저 붙이고, 이메일 로그인 흐름까지 연결해볼게요.',
+      text: '일반 유저는 기존 채팅방에서는 메시지를 보낼 수 있어요.',
       time: '18:02',
       isMine: false,
     },
@@ -134,7 +196,7 @@ const demoMessages: Record<string, ChatMessage[]> = {
       roomId: 'crew',
       author: '나',
       authorId: 'local-me',
-      text: '좋아요. 가입할 때 닉네임과 동의 기록도 같이 남기죠.',
+      text: '새 채팅 시작은 관리자 버튼으로만 열리게 만들겠습니다.',
       time: '18:04',
       isMine: true,
     },
@@ -143,7 +205,7 @@ const demoMessages: Record<string, ChatMessage[]> = {
       roomId: 'crew',
       author: '지우',
       authorId: 'jiwoo',
-      text: 'Vercel에는 Vite 빌드 결과를 올리고, Auth/Firestore 키는 환경변수로 관리하면 됩니다.',
+      text: '관리자는 유저 관리, 1:1 대화 시작, 단톡 생성을 할 수 있으면 좋겠네요.',
       time: '18:07',
       isMine: false,
     },
@@ -163,7 +225,7 @@ const demoMessages: Record<string, ChatMessage[]> = {
       roomId: 'design',
       author: '나',
       authorId: 'local-me',
-      text: '로그인 화면도 채팅 앱처럼 단단하고 가볍게 맞춰볼게요.',
+      text: '권한별로 버튼이 다르게 보이도록 맞춰볼게요.',
       time: '17:45',
       isMine: true,
     },
@@ -187,6 +249,18 @@ const timeFormatter = new Intl.DateTimeFormat('ko-KR', {
   minute: '2-digit',
 })
 
+const roomAccents = ['#06c755', '#4f7cff', '#ffb224', '#f25f5c', '#6f7bd9']
+
+const roleCopy: Record<UserRole, string> = {
+  user: '일반인',
+  admin: '관리자',
+}
+
+const statusCopy: Record<UserStatus, string> = {
+  active: '활성',
+  blocked: '차단',
+}
+
 const makeLocalId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -198,6 +272,19 @@ const getFallbackNickname = (email: string) => {
   const localPart = email.split('@')[0]?.trim()
   return localPart || '친구'
 }
+
+const normalizeRole = (role: unknown): UserRole => (role === 'admin' ? 'admin' : 'user')
+
+const normalizeStatus = (status: unknown): UserStatus =>
+  status === 'blocked' ? 'blocked' : 'active'
+
+const getDemoRole = (email: string): UserRole =>
+  email.toLowerCase().includes('admin') ? 'admin' : 'user'
+
+const getDemoUserId = (email: string) =>
+  getDemoRole(email) === 'admin' ? 'demo-admin' : 'local-me'
+
+const getRoomAccent = (seed: number) => roomAccents[seed % roomAccents.length]
 
 const connectionCopy: Record<ConnectionState, string> = {
   demo: '로컬 데모',
@@ -239,17 +326,24 @@ const getAuthErrorMessage = (error: unknown) => {
 
 const buildSessionFromUser = async (user: User): Promise<AuthSession> => {
   let nickname = user.displayName ?? ''
+  let role: UserRole = 'user'
+  let status: UserStatus = 'active'
 
-  if (!nickname && db) {
+  if (db) {
     const profileSnapshot = await getDoc(doc(db, 'users', user.uid))
     const profile = profileSnapshot.data() as StoredUserProfile | undefined
-    nickname = typeof profile?.nickname === 'string' ? profile.nickname : ''
+
+    nickname = typeof profile?.nickname === 'string' ? profile.nickname : nickname
+    role = normalizeRole(profile?.role)
+    status = normalizeStatus(profile?.status)
   }
 
   return {
     uid: user.uid,
     email: user.email ?? '',
     nickname,
+    role,
+    status,
     isDemo: false,
   }
 }
@@ -266,7 +360,8 @@ function App() {
   const [authError, setAuthError] = useState('')
   const [authMessage, setAuthMessage] = useState('')
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false)
-  const [activeRoomId, setActiveRoomId] = useState(rooms[0].id)
+  const [chatRooms, setChatRooms] = useState(initialRooms)
+  const [activeRoomId, setActiveRoomId] = useState(initialRooms[0].id)
   const [draft, setDraft] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [messagesByRoom, setMessagesByRoom] = useState(demoMessages)
@@ -275,25 +370,42 @@ function App() {
     isFirebaseConfigured ? 'connecting' : 'demo',
   )
   const [currentUserId, setCurrentUserId] = useState('local-me')
+  const [managedUsers, setManagedUsers] = useState(demoUsers)
+  const [adminPanel, setAdminPanel] = useState<AdminPanel>('users')
+  const [adminNotice, setAdminNotice] = useState('')
+  const [directTargetId, setDirectTargetId] = useState('')
+  const [groupName, setGroupName] = useState('')
+  const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([
+    'minseo',
+    'jiwoo',
+  ])
+
+  const isAdmin = authSession?.role === 'admin'
+  const canSendMessage = authSession?.status === 'active'
 
   const activeRoom = useMemo(
-    () => rooms.find((room) => room.id === activeRoomId) ?? rooms[0],
-    [activeRoomId],
+    () => chatRooms.find((room) => room.id === activeRoomId) ?? chatRooms[0] ?? initialRooms[0],
+    [activeRoomId, chatRooms],
+  )
+
+  const manageableUsers = useMemo(
+    () => managedUsers.filter((user) => user.id !== authSession?.uid),
+    [authSession?.uid, managedUsers],
   )
 
   const filteredRooms = useMemo(() => {
     const normalizedTerm = searchTerm.trim().toLowerCase()
 
     if (!normalizedTerm) {
-      return rooms
+      return chatRooms
     }
 
-    return rooms.filter((room) =>
+    return chatRooms.filter((room) =>
       `${room.name} ${room.subtitle} ${room.status}`
         .toLowerCase()
         .includes(normalizedTerm),
     )
-  }, [searchTerm])
+  }, [chatRooms, searchTerm])
 
   const visibleMessages = useMemo(() => {
     if (isFirebaseConfigured && authSession && connectionState !== 'error') {
@@ -310,8 +422,8 @@ function App() {
   ])
 
   const unreadTotal = useMemo(
-    () => rooms.reduce((total, room) => total + room.unread, 0),
-    [],
+    () => chatRooms.reduce((total, room) => total + room.unread, 0),
+    [chatRooms],
   )
 
   useEffect(() => {
@@ -345,6 +457,8 @@ function App() {
             uid: user.uid,
             email: user.email ?? '',
             nickname: user.displayName ?? '',
+            role: 'user',
+            status: 'active',
             isDemo: false,
           })
           setCurrentUserId(user.uid)
@@ -358,6 +472,102 @@ function App() {
       unsubscribe()
     }
   }, [])
+
+  useEffect(() => {
+    if (!authSession || !isFirebaseConfigured || !db) {
+      return
+    }
+
+    const roomsQuery =
+      authSession.role === 'admin'
+        ? query(collection(db, 'rooms'), limit(80))
+        : query(
+            collection(db, 'rooms'),
+            where('participantIds', 'array-contains', authSession.uid),
+            limit(80),
+          )
+
+    const unsubscribe = onSnapshot(
+      roomsQuery,
+      (snapshot) => {
+        const remoteRooms: ChatRoom[] = snapshot.docs.map((roomDoc, index) => {
+          const data = roomDoc.data() as StoredRoom
+          const participantIds = Array.isArray(data.participantIds)
+            ? data.participantIds.filter((id): id is string => typeof id === 'string')
+            : []
+          const type: RoomType = data.type === 'direct' ? 'direct' : 'group'
+
+          return {
+            id: roomDoc.id,
+            name: typeof data.name === 'string' ? data.name : '새 채팅방',
+            subtitle:
+              typeof data.subtitle === 'string'
+                ? data.subtitle
+                : type === 'direct'
+                  ? '관리자가 시작한 1:1 대화'
+                  : '관리자가 만든 단톡방',
+            members: `${Math.max(participantIds.length, 1)}명`,
+            unread: 0,
+            accent: getRoomAccent(index + 1),
+            status: typeof data.status === 'string' ? data.status : '대화 가능',
+            type,
+            participantIds,
+          }
+        })
+
+        const mergedRooms = [
+          ...remoteRooms,
+          ...initialRooms.filter(
+            (initialRoom) => !remoteRooms.some((remoteRoom) => remoteRoom.id === initialRoom.id),
+          ),
+        ]
+
+        setChatRooms(mergedRooms)
+      },
+      () => {
+        setAdminNotice('채팅방 목록을 불러오지 못했습니다.')
+      },
+    )
+
+    return unsubscribe
+  }, [authSession])
+
+  useEffect(() => {
+    if (!authSession || authSession.role !== 'admin' || !isFirebaseConfigured || !db) {
+      return
+    }
+
+    const usersQuery = query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(100))
+
+    const unsubscribe = onSnapshot(
+      usersQuery,
+      (snapshot) => {
+        const nextUsers = snapshot.docs.map((userDoc) => {
+          const data = userDoc.data() as StoredUserProfile
+          const fallbackEmail = typeof data.email === 'string' ? data.email : ''
+          const fallbackNickname =
+            typeof data.nickname === 'string'
+              ? data.nickname
+              : getFallbackNickname(fallbackEmail)
+
+          return {
+            id: userDoc.id,
+            email: fallbackEmail,
+            nickname: fallbackNickname,
+            role: normalizeRole(data.role),
+            status: normalizeStatus(data.status),
+          }
+        })
+
+        setManagedUsers(nextUsers)
+      },
+      () => {
+        setAdminNotice('유저 목록을 불러오지 못했습니다.')
+      },
+    )
+
+    return unsubscribe
+  }, [authSession])
 
   useEffect(() => {
     if (!authSession || !isFirebaseConfigured || !db) {
@@ -406,13 +616,17 @@ function App() {
   }, [activeRoomId, authSession])
 
   const completeDemoAuth = (email: string, nickname = getFallbackNickname(email)) => {
+    const role = getDemoRole(email)
+
     setAuthSession({
-      uid: 'local-me',
+      uid: getDemoUserId(email),
       email,
-      nickname,
+      nickname: role === 'admin' ? '운영자' : nickname,
+      role,
+      status: 'active',
       isDemo: true,
     })
-    setCurrentUserId('local-me')
+    setCurrentUserId(getDemoUserId(email))
     setConnectionState('demo')
   }
 
@@ -438,6 +652,8 @@ function App() {
             uid,
             email,
             nickname,
+            role: 'user',
+            status: 'active',
             thirdPartyConsent: consentGranted,
             thirdPartyConsentAt: serverTimestamp(),
             createdAt: serverTimestamp(),
@@ -513,6 +729,8 @@ function App() {
           uid: user.uid,
           email,
           nickname,
+          role: 'user',
+          status: 'active',
           isDemo: false,
         })
         setCurrentUserId(user.uid)
@@ -574,6 +792,7 @@ function App() {
     setAuthError('')
     setAuthMessage('')
     setDraft('')
+    setAdminNotice('')
 
     if (isFirebaseConfigured && auth) {
       await signOut(auth)
@@ -584,6 +803,16 @@ function App() {
     setAuthSession(null)
     setCurrentUserId('local-me')
     setConnectionState('demo')
+  }
+
+  const openAdminPanel = (panel: AdminPanel) => {
+    if (!isAdmin) {
+      setAdminNotice('일반인은 새 채팅을 먼저 시작할 수 없습니다.')
+      return
+    }
+
+    setAdminPanel(panel)
+    setAdminNotice('')
   }
 
   const handleSelectRoom = (roomId: string) => {
@@ -602,12 +831,217 @@ function App() {
     }))
   }
 
+  const handleCreateDirectChat = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    if (!authSession || !isAdmin) {
+      setAdminNotice('관리자만 대화를 시작할 수 있습니다.')
+      return
+    }
+
+    const targetId = directTargetId || manageableUsers[0]?.id
+    const targetUser = manageableUsers.find((user) => user.id === targetId)
+
+    if (!targetUser) {
+      setAdminNotice('대화를 시작할 유저가 없습니다.')
+      return
+    }
+
+    const existingRoom = chatRooms.find(
+      (room) =>
+        room.type === 'direct' &&
+        room.participantIds?.includes(authSession.uid) &&
+        room.participantIds.includes(targetUser.id),
+    )
+
+    if (existingRoom) {
+      setActiveRoomId(existingRoom.id)
+      setAdminNotice(`${targetUser.nickname}님과의 기존 대화방을 열었습니다.`)
+      return
+    }
+
+    let roomId = makeLocalId()
+    const participantIds = [authSession.uid, targetUser.id]
+    const nextRoom: ChatRoom = {
+      id: roomId,
+      name: targetUser.nickname,
+      subtitle: `${authSession.nickname}님이 시작한 1:1 대화`,
+      members: '2명',
+      unread: 0,
+      accent: '#06c755',
+      status: '1:1',
+      type: 'direct',
+      participantIds,
+    }
+
+    try {
+      if (isFirebaseConfigured && db) {
+        const roomDoc = await addDoc(collection(db, 'rooms'), {
+          name: nextRoom.name,
+          subtitle: nextRoom.subtitle,
+          status: nextRoom.status,
+          type: 'direct',
+          participantIds,
+          createdBy: authSession.uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+        roomId = roomDoc.id
+      }
+
+      const createdRoom = { ...nextRoom, id: roomId }
+      setChatRooms((currentRooms) => [createdRoom, ...currentRooms])
+      setMessagesByRoom((currentMessages) => ({
+        ...currentMessages,
+        [roomId]: currentMessages[roomId] ?? [],
+      }))
+      setActiveRoomId(roomId)
+      setAdminNotice(`${targetUser.nickname}님과의 대화를 시작했습니다.`)
+    } catch {
+      setAdminNotice('대화방을 만들지 못했습니다. 권한과 규칙을 확인해주세요.')
+    }
+  }
+
+  const toggleGroupMember = (userId: string) => {
+    setSelectedGroupMemberIds((currentIds) =>
+      currentIds.includes(userId)
+        ? currentIds.filter((id) => id !== userId)
+        : [...currentIds, userId],
+    )
+  }
+
+  const handleCreateGroupChat = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    if (!authSession || !isAdmin) {
+      setAdminNotice('관리자만 단톡을 만들 수 있습니다.')
+      return
+    }
+
+    const roomName = groupName.trim()
+
+    if (roomName.length < 2) {
+      setAdminNotice('단톡 이름은 2자 이상으로 입력해주세요.')
+      return
+    }
+
+    if (selectedGroupMemberIds.length < 2) {
+      setAdminNotice('단톡에는 유저를 2명 이상 선택해주세요.')
+      return
+    }
+
+    let roomId = makeLocalId()
+    const participantIds = [authSession.uid, ...selectedGroupMemberIds]
+    const nextRoom: ChatRoom = {
+      id: roomId,
+      name: roomName,
+      subtitle: `${authSession.nickname}님이 만든 단톡방`,
+      members: `${participantIds.length}명`,
+      unread: 0,
+      accent: getRoomAccent(chatRooms.length + 1),
+      status: '단톡',
+      type: 'group',
+      participantIds,
+    }
+
+    try {
+      if (isFirebaseConfigured && db) {
+        const roomDoc = await addDoc(collection(db, 'rooms'), {
+          name: nextRoom.name,
+          subtitle: nextRoom.subtitle,
+          status: nextRoom.status,
+          type: 'group',
+          participantIds,
+          createdBy: authSession.uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+        roomId = roomDoc.id
+      }
+
+      const createdRoom = { ...nextRoom, id: roomId }
+      setChatRooms((currentRooms) => [createdRoom, ...currentRooms])
+      setMessagesByRoom((currentMessages) => ({
+        ...currentMessages,
+        [roomId]: currentMessages[roomId] ?? [],
+      }))
+      setGroupName('')
+      setActiveRoomId(roomId)
+      setAdminNotice(`${roomName} 단톡방을 만들었습니다.`)
+    } catch {
+      setAdminNotice('단톡방을 만들지 못했습니다. 권한과 규칙을 확인해주세요.')
+    }
+  }
+
+  const handleToggleUserStatus = async (user: ManagedUser) => {
+    if (!isAdmin) {
+      return
+    }
+
+    const nextStatus: UserStatus = user.status === 'active' ? 'blocked' : 'active'
+
+    try {
+      if (isFirebaseConfigured && db) {
+        await setDoc(
+          doc(db, 'users', user.id),
+          {
+            status: nextStatus,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        )
+      }
+
+      setManagedUsers((currentUsers) =>
+        currentUsers.map((currentUser) =>
+          currentUser.id === user.id
+            ? { ...currentUser, status: nextStatus }
+            : currentUser,
+        ),
+      )
+      setAdminNotice(`${user.nickname}님을 ${statusCopy[nextStatus]} 상태로 변경했습니다.`)
+    } catch {
+      setAdminNotice('유저 상태를 변경하지 못했습니다.')
+    }
+  }
+
+  const handleToggleUserRole = async (user: ManagedUser) => {
+    if (!isAdmin || user.id === authSession?.uid) {
+      setAdminNotice('본인 권한은 여기서 변경할 수 없습니다.')
+      return
+    }
+
+    const nextRole: UserRole = user.role === 'admin' ? 'user' : 'admin'
+
+    try {
+      if (isFirebaseConfigured && db) {
+        await setDoc(
+          doc(db, 'users', user.id),
+          {
+            role: nextRole,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        )
+      }
+
+      setManagedUsers((currentUsers) =>
+        currentUsers.map((currentUser) =>
+          currentUser.id === user.id ? { ...currentUser, role: nextRole } : currentUser,
+        ),
+      )
+      setAdminNotice(`${user.nickname}님 권한을 ${roleCopy[nextRole]}으로 변경했습니다.`)
+    } catch {
+      setAdminNotice('유저 권한을 변경하지 못했습니다.')
+    }
+  }
+
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
     const text = draft.trim()
 
-    if (!text || !authSession) {
+    if (!text || !authSession || !canSendMessage) {
       return
     }
 
@@ -669,9 +1103,9 @@ function App() {
               <span />
             </div>
             <div className="preview-bubbles">
-              <p>안녕하세요, 회의 자료 공유드려요.</p>
-              <p>확인했습니다. 채팅방에 고정할게요.</p>
-              <p>가입 동의 기록도 같이 저장됩니다.</p>
+              <p>일반 유저는 기존 방에서만 대화할 수 있어요.</p>
+              <p>관리자는 유저와 먼저 대화를 시작할 수 있습니다.</p>
+              <p>단톡방 생성도 관리자 권한으로 처리됩니다.</p>
             </div>
           </div>
         </section>
@@ -767,7 +1201,7 @@ function App() {
             {!isFirebaseConfigured && (
               <div className="demo-note">
                 <ShieldCheck size={17} />
-                <span>Firebase 환경변수가 없어 데모 모드로 진행됩니다.</span>
+                <span>데모에서 관리자 확인은 이메일에 admin을 넣어 로그인하세요.</span>
               </div>
             )}
           </form>
@@ -826,12 +1260,29 @@ function App() {
             <Bell size={21} />
             <span className="dot" />
           </button>
+          {isAdmin && (
+            <button
+              className="rail-button"
+              type="button"
+              onClick={() => openAdminPanel('users')}
+              aria-label="관리"
+              title="관리"
+            >
+              <ShieldCheck size={21} />
+            </button>
+          )}
           <button className="rail-button" type="button" aria-label="설정" title="설정">
             <Settings size={21} />
           </button>
         </nav>
         <div className="rail-spacer" />
-        <button className="rail-button" type="button" onClick={handleLogout} aria-label="로그아웃" title="로그아웃">
+        <button
+          className="rail-button"
+          type="button"
+          onClick={handleLogout}
+          aria-label="로그아웃"
+          title="로그아웃"
+        >
           <LogOut size={21} />
         </button>
       </aside>
@@ -841,9 +1292,20 @@ function App() {
           <div>
             <p className="eyebrow">GreenTalk</p>
             <h1>채팅</h1>
-            <p className="signed-user">{authSession.nickname}</p>
+            <p className="signed-user">
+              {authSession.nickname}
+              <span className={`role-pill is-${authSession.role}`}>
+                {roleCopy[authSession.role]}
+              </span>
+            </p>
           </div>
-          <button className="icon-button" type="button" aria-label="채팅방 추가" title="채팅방 추가">
+          <button
+            className="icon-button"
+            type="button"
+            onClick={() => openAdminPanel('direct')}
+            aria-label={isAdmin ? '대화 시작' : '대화 시작 제한'}
+            title={isAdmin ? '대화 시작' : '관리자만 대화를 시작할 수 있음'}
+          >
             <Plus size={20} />
           </button>
         </div>
@@ -863,6 +1325,27 @@ function App() {
           <span>{connectionCopy[connectionState]}</span>
           <strong>{unreadTotal}</strong>
         </div>
+
+        {isAdmin ? (
+          <div className="admin-quick-actions">
+            <button type="button" onClick={() => openAdminPanel('users')}>
+              <UserRound size={16} />
+              유저
+            </button>
+            <button type="button" onClick={() => openAdminPanel('direct')}>
+              <MessageCircle size={16} />
+              1:1
+            </button>
+            <button type="button" onClick={() => openAdminPanel('group')}>
+              <Plus size={16} />
+              단톡
+            </button>
+          </div>
+        ) : (
+          <p className="permission-note">기존 채팅방에서만 메시지를 보낼 수 있습니다.</p>
+        )}
+
+        {adminNotice && <p className="admin-notice">{adminNotice}</p>}
 
         <div className="room-list">
           {filteredRooms.map((room) => (
@@ -890,7 +1373,7 @@ function App() {
 
       <section className="conversation-panel" aria-label={`${activeRoom.name} 대화`}>
         <div className="mobile-room-tabs" aria-label="모바일 채팅방 전환">
-          {rooms.map((room) => (
+          {chatRooms.map((room) => (
             <button
               className={room.id === activeRoomId ? 'is-active' : ''}
               key={room.id}
@@ -970,14 +1453,25 @@ function App() {
           </div>
           <input
             value={draft}
+            disabled={!canSendMessage}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder={`${activeRoom.name}에 메시지 보내기`}
+            placeholder={
+              canSendMessage
+                ? `${activeRoom.name}에 메시지 보내기`
+                : '차단된 계정은 메시지를 보낼 수 없습니다.'
+            }
             aria-label="메시지 입력"
           />
           <button className="mic-button" type="button" aria-label="음성 입력" title="음성 입력">
             <Mic size={19} />
           </button>
-          <button className="send-button" type="submit" aria-label="전송" title="전송">
+          <button
+            className="send-button"
+            type="submit"
+            disabled={!canSendMessage}
+            aria-label="전송"
+            title="전송"
+          >
             <Send size={19} />
           </button>
         </form>
@@ -1007,17 +1501,129 @@ function App() {
             </button>
           </div>
         </div>
-        <div className="detail-section">
-          <h3>고정된 항목</h3>
-          <button className="pinned-item" type="button">
-            <CheckCheck size={18} />
-            <span>이메일 로그인 및 닉네임 프로필</span>
-          </button>
-          <button className="pinned-item" type="button">
-            <CheckCheck size={18} />
-            <span>개인정보 제3자 제공 동의 기록</span>
-          </button>
-        </div>
+
+        {isAdmin ? (
+          <div className="admin-console">
+            <div className="admin-tabs" role="tablist" aria-label="관리 메뉴">
+              <button
+                className={adminPanel === 'users' ? 'is-active' : ''}
+                type="button"
+                onClick={() => openAdminPanel('users')}
+              >
+                유저
+              </button>
+              <button
+                className={adminPanel === 'direct' ? 'is-active' : ''}
+                type="button"
+                onClick={() => openAdminPanel('direct')}
+              >
+                1:1
+              </button>
+              <button
+                className={adminPanel === 'group' ? 'is-active' : ''}
+                type="button"
+                onClick={() => openAdminPanel('group')}
+              >
+                단톡
+              </button>
+            </div>
+
+            {adminPanel === 'users' && (
+              <div className="managed-user-list">
+                {managedUsers.map((user) => (
+                  <article className="managed-user-row" key={user.id}>
+                    <span className="avatar small">{user.nickname.slice(0, 1)}</span>
+                    <div>
+                      <strong>{user.nickname}</strong>
+                      <span>{user.email || '이메일 없음'}</span>
+                      <small>
+                        {roleCopy[user.role]} · {statusCopy[user.status]}
+                      </small>
+                    </div>
+                    <div className="user-actions">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleUserRole(user)}
+                        disabled={user.id === authSession.uid}
+                      >
+                        권한
+                      </button>
+                      <button type="button" onClick={() => handleToggleUserStatus(user)}>
+                        {user.status === 'active' ? '차단' : '해제'}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+
+            {adminPanel === 'direct' && (
+              <form className="admin-form" onSubmit={handleCreateDirectChat}>
+                <label className="field">
+                  <span>대화할 유저</span>
+                  <select
+                    value={directTargetId || manageableUsers[0]?.id || ''}
+                    onChange={(event) => setDirectTargetId(event.target.value)}
+                    disabled={manageableUsers.length === 0}
+                  >
+                    {manageableUsers.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.nickname} · {roleCopy[user.role]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button className="primary-button" type="submit">
+                  1:1 대화 시작
+                </button>
+              </form>
+            )}
+
+            {adminPanel === 'group' && (
+              <form className="admin-form" onSubmit={handleCreateGroupChat}>
+                <label className="field">
+                  <span>단톡 이름</span>
+                  <div className="field-control">
+                    <MessageCircle size={18} />
+                    <input
+                      value={groupName}
+                      onChange={(event) => setGroupName(event.target.value)}
+                      placeholder="예: 신규 상담팀"
+                    />
+                  </div>
+                </label>
+                <div className="group-member-list">
+                  {manageableUsers.map((user) => (
+                    <label className="member-check" key={user.id}>
+                      <input
+                        type="checkbox"
+                        checked={selectedGroupMemberIds.includes(user.id)}
+                        onChange={() => toggleGroupMember(user.id)}
+                      />
+                      <span>{user.nickname}</span>
+                      <small>{statusCopy[user.status]}</small>
+                    </label>
+                  ))}
+                </div>
+                <button className="primary-button" type="submit">
+                  단톡 만들기
+                </button>
+              </form>
+            )}
+          </div>
+        ) : (
+          <div className="detail-section">
+            <h3>권한</h3>
+            <button className="pinned-item" type="button">
+              <CheckCheck size={18} />
+              <span>기존 채팅방 메시지 전송</span>
+            </button>
+            <button className="pinned-item is-locked" type="button">
+              <LockKeyhole size={18} />
+              <span>새 대화 시작은 관리자 전용</span>
+            </button>
+          </div>
+        )}
       </aside>
     </main>
   )
