@@ -200,8 +200,8 @@ const retentionCopy: Record<RetentionPolicy, string> = {
 }
 
 const retentionDescription: Record<RetentionPolicy, string> = {
-  oneDay: '새 메시지와 파일 메시지를 1일 뒤 서버 TTL 삭제 대상으로 저장합니다.',
-  oneMonth: '새 메시지와 파일 메시지를 30일 뒤 서버 TTL 삭제 대상으로 저장합니다.',
+  oneDay: '새 메시지와 파일은 1일 뒤 자동 삭제됩니다.',
+  oneMonth: '새 메시지와 파일은 30일 뒤 자동 삭제됩니다.',
 }
 
 const retentionDays: Record<RetentionPolicy, number> = {
@@ -299,9 +299,9 @@ const normalizeAttachment = (attachment: unknown): MessageAttachment | undefined
 }
 
 const connectionCopy: Record<ConnectionState, string> = {
-  connecting: 'Firebase 연결 중',
-  live: 'Firebase 실시간',
-  error: 'Firebase 확인 필요',
+  connecting: '연결 중',
+  live: '실시간 연결됨',
+  error: '연결 확인 필요',
 }
 
 const authModeCopy: Record<AuthMode, string> = {
@@ -847,7 +847,7 @@ function App() {
     }
 
     if (!isFirebaseConfigured || !auth || !db) {
-      setAuthError('Firebase 설정이 없어 로그인할 수 없습니다. .env의 VITE_FIREBASE_* 값을 확인해주세요.')
+      setAuthError('서비스 설정이 완료되지 않았습니다. 관리자에게 문의해주세요.')
       setConnectionState('error')
       return
     }
@@ -912,7 +912,7 @@ function App() {
 
     try {
       if (!isFirebaseConfigured || !db || !auth?.currentUser) {
-        setAuthError('Firebase 연결을 확인해주세요.')
+        setAuthError('연결 상태를 확인해주세요.')
         return
       }
 
@@ -966,7 +966,7 @@ function App() {
     event.preventDefault()
 
     if (!authSession || !auth?.currentUser || !db) {
-      setSettingsError('Firebase 연결을 확인해주세요.')
+      setSettingsError('연결 상태를 확인해주세요.')
       return
     }
 
@@ -997,7 +997,7 @@ function App() {
   const uploadProfileImage = (file: File, path: string) =>
     new Promise<UploadTaskSnapshot>((resolve, reject) => {
       if (!fileStorage) {
-        reject(new Error('Firebase Storage is not configured.'))
+        reject(new Error('File upload is not available.'))
         return
       }
 
@@ -1034,7 +1034,7 @@ function App() {
     }
 
     if (!authSession || !auth?.currentUser || !db || !fileStorage) {
-      setSettingsError('Firebase Storage 연결을 확인해주세요.')
+      setSettingsError('파일 업로드 상태를 확인해주세요.')
       return
     }
 
@@ -1130,7 +1130,7 @@ function App() {
     event.preventDefault()
 
     if (!authSession || !auth?.currentUser || !db) {
-      setSettingsError('Firebase 연결을 확인해주세요.')
+      setSettingsError('연결 상태를 확인해주세요.')
       return
     }
 
@@ -1281,7 +1281,7 @@ function App() {
     try {
       if (!isFirebaseConfigured || !db) {
         setConnectionState('error')
-        setAdminNotice('Firebase 연결을 확인해주세요.')
+        setAdminNotice('연결 상태를 확인해주세요.')
         return
       }
 
@@ -1305,7 +1305,7 @@ function App() {
       setReadReceipts([])
       setAdminNotice(`${targetUser.nickname}님과의 대화를 시작했습니다.`)
     } catch {
-      setAdminNotice('대화방을 만들지 못했습니다. 권한과 규칙을 확인해주세요.')
+      setAdminNotice('대화방을 만들지 못했습니다. 권한을 확인해주세요.')
     }
   }
 
@@ -1343,7 +1343,7 @@ function App() {
     try {
       if (!isFirebaseConfigured || !db) {
         setConnectionState('error')
-        setAdminNotice('Firebase 연결을 확인해주세요.')
+        setAdminNotice('연결 상태를 확인해주세요.')
         return
       }
 
@@ -1368,7 +1368,7 @@ function App() {
       setReadReceipts([])
       setAdminNotice(`${roomName} 단톡방을 만들었습니다.`)
     } catch {
-      setAdminNotice('단톡방을 만들지 못했습니다. 권한과 규칙을 확인해주세요.')
+      setAdminNotice('단톡방을 만들지 못했습니다. 권한을 확인해주세요.')
     }
   }
 
@@ -1382,7 +1382,7 @@ function App() {
     try {
       if (!isFirebaseConfigured || !db) {
         setConnectionState('error')
-        setAdminNotice('Firebase 연결을 확인해주세요.')
+        setAdminNotice('연결 상태를 확인해주세요.')
         return
       }
 
@@ -1411,7 +1411,7 @@ function App() {
     try {
       if (!isFirebaseConfigured || !db) {
         setConnectionState('error')
-        setAdminNotice('Firebase 연결을 확인해주세요.')
+        setAdminNotice('연결 상태를 확인해주세요.')
         return
       }
 
@@ -1445,7 +1445,7 @@ function App() {
     try {
       if (!isFirebaseConfigured || !db) {
         setConnectionState('error')
-        setAdminNotice('Firebase 연결을 확인해주세요.')
+        setAdminNotice('연결 상태를 확인해주세요.')
         return
       }
 
@@ -1472,7 +1472,7 @@ function App() {
   ) =>
     new Promise<UploadTaskSnapshot>((resolve, reject) => {
       if (!fileStorage) {
-        reject(new Error('Firebase Storage is not configured.'))
+        reject(new Error('File upload is not available.'))
         return
       }
 
@@ -1512,7 +1512,7 @@ function App() {
 
     if (!db || !fileStorage || !auth?.currentUser) {
       setConnectionState('error')
-      setUploadNotice('Firebase Storage 연결을 확인해주세요.')
+      setUploadNotice('파일 전송 상태를 확인해주세요.')
       return
     }
 
@@ -1561,7 +1561,7 @@ function App() {
       setUploadProgress(100)
     } catch {
       setConnectionState('error')
-      setUploadNotice('파일을 보내지 못했습니다. Storage 권한과 설정을 확인해주세요.')
+      setUploadNotice('파일을 보내지 못했습니다. 권한을 확인해주세요.')
     } finally {
       setIsUploading(false)
     }
@@ -1631,7 +1631,7 @@ function App() {
 
     if (!isFirebaseConfigured || !db || !auth?.currentUser) {
       setConnectionState('error')
-      setAdminNotice('Firebase 연결을 확인해주세요.')
+      setAdminNotice('연결 상태를 확인해주세요.')
       return
     }
 
@@ -1647,7 +1647,7 @@ function App() {
       setDraft('')
     } catch {
       setConnectionState('error')
-      setAdminNotice('메시지를 저장하지 못했습니다. 권한과 규칙을 확인해주세요.')
+      setAdminNotice('메시지를 보내지 못했습니다. 권한을 확인해주세요.')
     }
   }
 
@@ -1658,9 +1658,9 @@ function App() {
           <span className="brand-mark auth-brand">
             <ShieldCheck size={28} strokeWidth={2.4} />
           </span>
-          <h1>Firebase 설정 필요</h1>
+          <h1>서비스 준비 필요</h1>
           <p className="form-message is-error">
-            .env의 VITE_FIREBASE_* 값을 채워야 GreenTalk를 실행할 수 있습니다.
+            서비스 설정이 완료되지 않았습니다. 관리자에게 문의해주세요.
           </p>
         </section>
       </main>
@@ -1773,8 +1773,8 @@ function App() {
                 />
                 <span>
                   <strong>개인정보 제3자 제공에 동의합니다.</strong>
-                  Firebase Authentication, Cloud Firestore, Vercel에 이메일,
-                  닉네임, 서비스 이용 기록이 제공될 수 있습니다.
+                  로그인, 데이터 보관, 서비스 제공을 위해 이메일, 닉네임,
+                  서비스 이용 기록이 처리될 수 있습니다.
                 </span>
               </label>
             )}
@@ -2480,7 +2480,7 @@ function App() {
                 : canSendMessage
                   ? `${activeRoom.name}에 메시지 보내기`
                   : connectionState === 'error'
-                    ? 'Firebase 연결을 확인해주세요.'
+                    ? '연결 상태를 확인해주세요.'
                     : '차단된 계정은 메시지를 보낼 수 없습니다.'
             }
             aria-label="메시지 입력"
@@ -2511,7 +2511,7 @@ function App() {
             {(activeRoom?.name ?? 'G').slice(0, 1)}
           </span>
           <h2>{activeRoom?.name ?? '채팅방 없음'}</h2>
-          <p>{activeRoom?.subtitle ?? 'Firestore에서 불러온 채팅방이 여기에 표시됩니다.'}</p>
+          <p>{activeRoom?.subtitle ?? '채팅방 정보가 여기에 표시됩니다.'}</p>
           <div className="profile-actions">
             <button type="button" aria-label="통화" title="통화" disabled={!activeRoom}>
               <Phone size={18} />
