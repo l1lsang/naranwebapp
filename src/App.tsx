@@ -1991,6 +1991,29 @@ function App() {
     )
   }
 
+  const renderActiveRoomRetentionControl = () => {
+    if (!isAdmin || !activeRoom) {
+      return null
+    }
+
+    return (
+      <div className="chat-retention-control" role="radiogroup" aria-label="현재 채팅방 삭제 정책">
+        {(['oneDay', 'oneMonth'] as RetentionPolicy[]).map((policy) => (
+          <button
+            className={activeRoom.retentionPolicy === policy ? 'is-active' : ''}
+            key={policy}
+            type="button"
+            onClick={() => void handleUpdateRoomRetention(activeRoom.id, policy)}
+            aria-pressed={activeRoom.retentionPolicy === policy}
+            title={retentionDescription[policy]}
+          >
+            {policy === 'oneDay' ? '1일 후' : '1달 후'}
+          </button>
+        ))}
+      </div>
+    )
+  }
+
   return (
     <main
       className={`app-shell is-mobile-tab-${mobileTab} ${
@@ -2293,6 +2316,7 @@ function App() {
               </p>
             </div>
           </div>
+          {renderActiveRoomRetentionControl()}
           <div className="chat-actions">
             <button
               className="icon-button"

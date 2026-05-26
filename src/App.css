@@ -805,11 +805,13 @@ h3 {
   border-bottom: 1px solid rgba(18, 52, 45, 0.08);
   background: rgba(255, 255, 255, 0.78);
   backdrop-filter: blur(16px);
+  gap: 12px;
   padding: 12px 22px;
 }
 
 .chat-title {
   min-width: 0;
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 13px;
@@ -819,11 +821,45 @@ h3 {
   min-width: 0;
 }
 
+.chat-title h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-title p {
   margin-top: 4px;
   color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
   font-weight: 700;
+}
+
+.chat-retention-control {
+  width: 138px;
+  min-height: 36px;
+  border-radius: 8px;
+  background: #eef3f0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+}
+
+.chat-retention-control button {
+  min-width: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.chat-retention-control button.is-active {
+  color: #ffffff;
+  background: var(--line-green);
 }
 
 .chat-actions {
@@ -1630,6 +1666,7 @@ h3 {
   }
 
   .chat-header {
+    gap: 8px;
     padding: 10px 14px;
   }
 
@@ -1654,6 +1691,14 @@ h3 {
   .chat-title .avatar.large {
     width: 42px;
     height: 42px;
+  }
+
+  .chat-retention-control {
+    width: 126px;
+  }
+
+  .chat-retention-control button {
+    font-size: 11px;
   }
 
   .chat-actions .icon-button:nth-child(1),
