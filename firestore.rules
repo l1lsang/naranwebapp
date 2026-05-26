@@ -46,6 +46,19 @@ service cloud.firestore {
       && request.resource.data.status in ['active', 'blocked'];
     }
 
+    function validReadReceipt(userId) {
+      return request.resource.data.keys().hasOnly([
+        'userId',
+        'lastReadMessageId',
+        'updatedAt'
+      ])
+      && request.resource.data.userId == userId
+      && request.resource.data.lastReadMessageId is string
+      && request.resource.data.lastReadMessageId.size() > 0
+      && request.resource.data.lastReadMessageId.size() <= 160
+      && request.resource.data.updatedAt == request.time;
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
 
@@ -99,6 +112,18 @@ service cloud.firestore {
 
       allow update: if isAdmin();
       allow delete: if false;
+
+      match /readReceipts/{userId} {
+        allow read: if signedIn()
+          && (isAdmin() || isRoomParticipant(roomId));
+
+        allow create, update: if signedIn()
+          && request.auth.uid == userId
+          && (isAdmin() || isRoomParticipant(roomId))
+          && validReadReceipt(userId);
+
+        allow delete: if false;
+      }
 
       match /messages/{messageId} {
         allow read: if signedIn()

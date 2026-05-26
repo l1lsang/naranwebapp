@@ -30,6 +30,8 @@ VITE_FIREBASE_APP_ID=
 
 메시지는 `rooms/{roomId}/messages` 하위 컬렉션에 저장됩니다. 일반 유저는 본인이 `participantIds`에 포함된 방에서만 메시지를 보낼 수 있습니다.
 
+읽음 상태는 `rooms/{roomId}/readReceipts/{uid}` 문서에 사용자별 마지막 읽은 메시지 ID로 저장됩니다. 클라이언트는 상대가 읽은 범위 안에서 내가 보낸 가장 최근 메시지 옆에 `읽음` 표시를 보여줍니다.
+
 ## Vercel 배포
 
 Vercel 프로젝트의 Environment Variables에 위 `VITE_FIREBASE_*` 값을 추가한 뒤 배포하면 됩니다. 이 저장소에는 Vite 정적 빌드를 위한 `vercel.json`이 포함되어 있습니다.

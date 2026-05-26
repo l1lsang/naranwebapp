@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   Bell,
   CheckCheck,
@@ -92,12 +92,22 @@ type ChatMessage = {
   isMine: boolean
 }
 
+type ReadReceipt = {
+  userId: string
+  lastReadMessageId: string
+}
+
 type StoredMessage = {
   roomId?: string
   authorId?: string
   authorName?: string
   text?: string
   createdAt?: Timestamp
+}
+
+type StoredReadReceipt = {
+  userId?: unknown
+  lastReadMessageId?: unknown
 }
 
 type StoredRoom = {
@@ -224,6 +234,7 @@ function App() {
   const [draft, setDraft] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [remoteMessages, setRemoteMessages] = useState<ChatMessage[]>([])
+  const [readReceipts, setReadReceipts] = useState<ReadReceipt[]>([])
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([])
   const [adminPanel, setAdminPanel] = useState<AdminPanel>('users')
@@ -231,6 +242,7 @@ function App() {
   const [directTargetId, setDirectTargetId] = useState('')
   const [groupName, setGroupName] = useState('')
   const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([])
+  const lastMarkedReadRef = useRef('')
 
   const isAdmin = authSession?.role === 'admin'
   const canSendMessage =
@@ -265,6 +277,37 @@ function App() {
     [activeRoom, authSession, remoteMessages],
   )
 
+  const readBadgeByMessageId = useMemo(() => {
+    const nextBadges: Record<string, number> = {}
+
+    if (!authSession || visibleMessages.length === 0) {
+      return nextBadges
+    }
+
+    readReceipts
+      .filter((receipt) => receipt.userId !== authSession.uid)
+      .forEach((receipt) => {
+        const readIndex = visibleMessages.findIndex(
+          (message) => message.id === receipt.lastReadMessageId,
+        )
+
+        if (readIndex < 0) {
+          return
+        }
+
+        for (let index = readIndex; index >= 0; index -= 1) {
+          const message = visibleMessages[index]
+
+          if (message.authorId === authSession.uid) {
+            nextBadges[message.id] = (nextBadges[message.id] ?? 0) + 1
+            return
+          }
+        }
+      })
+
+    return nextBadges
+  }, [authSession, readReceipts, visibleMessages])
+
   const unreadTotal = useMemo(
     () => chatRooms.reduce((total, room) => total + room.unread, 0),
     [chatRooms],
@@ -272,8 +315,6 @@ function App() {
 
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) {
-      setAuthReady(true)
-      setConnectionState('error')
       return
     }
 
@@ -284,6 +325,7 @@ function App() {
         setAuthSession(null)
         setChatRooms([])
         setRemoteMessages([])
+        setReadReceipts([])
         setManagedUsers([])
         setActiveRoomId('')
         setAuthReady(true)
@@ -321,8 +363,6 @@ function App() {
 
   useEffect(() => {
     if (!authSession || !isFirebaseConfigured || !db) {
-      setChatRooms([])
-      setActiveRoomId('')
       return
     }
 
@@ -364,6 +404,12 @@ function App() {
         })
 
         setChatRooms(remoteRooms)
+
+        if (remoteRooms.length === 0) {
+          setRemoteMessages([])
+          setReadReceipts([])
+        }
+
         setActiveRoomId((currentRoomId) => {
           if (remoteRooms.length === 0) {
             return ''
@@ -386,7 +432,6 @@ function App() {
 
   useEffect(() => {
     if (!authSession || authSession.role !== 'admin' || !isFirebaseConfigured || !db) {
-      setManagedUsers([])
       return
     }
 
@@ -424,7 +469,6 @@ function App() {
 
   useEffect(() => {
     if (!authSession || !isFirebaseConfigured || !db || !activeRoomId) {
-      setRemoteMessages([])
       return
     }
 
@@ -468,6 +512,71 @@ function App() {
 
     return unsubscribe
   }, [activeRoomId, authSession])
+
+  useEffect(() => {
+    if (!authSession || !isFirebaseConfigured || !db || !activeRoomId) {
+      return
+    }
+
+    const receiptsCollection = collection(db, 'rooms', activeRoomId, 'readReceipts')
+    const unsubscribe = onSnapshot(
+      receiptsCollection,
+      (snapshot) => {
+        const nextReceipts = snapshot.docs
+          .map((receiptDoc) => {
+            const data = receiptDoc.data() as StoredReadReceipt
+            const userId = typeof data.userId === 'string' ? data.userId : receiptDoc.id
+            const lastReadMessageId =
+              typeof data.lastReadMessageId === 'string' ? data.lastReadMessageId : ''
+
+            return {
+              userId,
+              lastReadMessageId,
+            }
+          })
+          .filter((receipt) => receipt.lastReadMessageId.length > 0)
+
+        setReadReceipts(nextReceipts)
+      },
+      () => {
+        setAdminNotice('읽음 상태를 불러오지 못했습니다.')
+      },
+    )
+
+    return unsubscribe
+  }, [activeRoomId, authSession])
+
+  useEffect(() => {
+    if (!authSession || !isFirebaseConfigured || !db || !activeRoomId) {
+      return
+    }
+
+    const latestMessage = visibleMessages.at(-1)
+
+    if (!latestMessage) {
+      return
+    }
+
+    const readKey = `${activeRoomId}:${latestMessage.id}`
+
+    if (lastMarkedReadRef.current === readKey) {
+      return
+    }
+
+    lastMarkedReadRef.current = readKey
+
+    void setDoc(
+      doc(db, 'rooms', activeRoomId, 'readReceipts', authSession.uid),
+      {
+        userId: authSession.uid,
+        lastReadMessageId: latestMessage.id,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    ).catch(() => {
+      setAdminNotice('읽음 상태를 저장하지 못했습니다.')
+    })
+  }, [activeRoomId, authSession, visibleMessages])
 
   const switchAuthMode = (nextMode: AuthMode) => {
     setAuthMode(nextMode)
@@ -619,6 +728,7 @@ function App() {
 
   const handleLogout = async () => {
     setRemoteMessages([])
+    setReadReceipts([])
     setAuthError('')
     setAuthMessage('')
     setDraft('')
@@ -632,6 +742,8 @@ function App() {
 
     setAuthSession(null)
     setChatRooms([])
+    setRemoteMessages([])
+    setReadReceipts([])
     setManagedUsers([])
     setActiveRoomId('')
     setConnectionState('error')
@@ -651,6 +763,7 @@ function App() {
     setActiveRoomId(roomId)
     setConnectionState('connecting')
     setRemoteMessages([])
+    setReadReceipts([])
   }
 
   const handleCreateDirectChat = async (event: FormEvent<HTMLFormElement>) => {
@@ -678,6 +791,8 @@ function App() {
 
     if (existingRoom) {
       setActiveRoomId(existingRoom.id)
+      setRemoteMessages([])
+      setReadReceipts([])
       setAdminNotice(`${targetUser.nickname}님과의 기존 대화방을 열었습니다.`)
       return
     }
@@ -705,6 +820,7 @@ function App() {
 
       setActiveRoomId(roomDoc.id)
       setConnectionState('connecting')
+      setReadReceipts([])
       setAdminNotice(`${targetUser.nickname}님과의 대화를 시작했습니다.`)
     } catch {
       setAdminNotice('대화방을 만들지 못했습니다. 권한과 규칙을 확인해주세요.')
@@ -763,6 +879,7 @@ function App() {
       setGroupName('')
       setActiveRoomId(roomDoc.id)
       setConnectionState('connecting')
+      setReadReceipts([])
       setAdminNotice(`${roomName} 단톡방을 만들었습니다.`)
     } catch {
       setAdminNotice('단톡방을 만들지 못했습니다. 권한과 규칙을 확인해주세요.')
@@ -1242,24 +1359,37 @@ function App() {
               <p>채팅방을 선택하거나 관리자가 새 대화를 만들어주세요.</p>
             </div>
           ) : visibleMessages.length > 0 ? (
-            visibleMessages.map((message) => (
-              <article
-                className={`message-row ${message.isMine ? 'is-mine' : ''}`}
-                key={message.id}
-              >
-                {!message.isMine && (
-                  <span className="avatar small">{message.author.slice(0, 1)}</span>
-                )}
-                <div className="message-stack">
-                  {!message.isMine && <span className="message-author">{message.author}</span>}
-                  <div className="bubble-line">
-                    {message.isMine && <span className="message-time">{message.time}</span>}
-                    <p className="message-bubble">{message.text}</p>
-                    {!message.isMine && <span className="message-time">{message.time}</span>}
+            visibleMessages.map((message) => {
+              const readCount = readBadgeByMessageId[message.id] ?? 0
+
+              return (
+                <article
+                  className={`message-row ${message.isMine ? 'is-mine' : ''}`}
+                  key={message.id}
+                >
+                  {!message.isMine && (
+                    <span className="avatar small">{message.author.slice(0, 1)}</span>
+                  )}
+                  <div className="message-stack">
+                    {!message.isMine && <span className="message-author">{message.author}</span>}
+                    <div className="bubble-line">
+                      {message.isMine && (
+                        <span className="message-meta">
+                          {readCount > 0 && (
+                            <span className="read-receipt">
+                              {readCount > 1 ? `읽음 ${readCount}` : '읽음'}
+                            </span>
+                          )}
+                          <span className="message-time">{message.time}</span>
+                        </span>
+                      )}
+                      <p className="message-bubble">{message.text}</p>
+                      {!message.isMine && <span className="message-time">{message.time}</span>}
+                    </div>
                   </div>
-                </div>
-              </article>
-            ))
+                </article>
+              )
+            })
           ) : (
             <div className="empty-state">
               <MessageCircle size={34} />
