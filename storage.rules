@@ -36,5 +36,14 @@ service firebase.storage {
 
       allow delete: if isOwner(userId);
     }
+
+    match /roomImages/{roomId}/{userId}/{fileName=**} {
+      allow read: if signedIn();
+
+      allow create, update: if isOwner(userId)
+        && validImageUpload(5 * 1024 * 1024);
+
+      allow delete: if isOwner(userId);
+    }
   }
 }

@@ -78,7 +78,7 @@ type AuthMode = 'login' | 'signup' | 'reset'
 type ConnectionState = 'connecting' | 'live' | 'error'
 type UserRole = 'user' | 'admin'
 type UserStatus = 'active' | 'blocked'
-type AdminPanel = 'users' | 'direct' | 'group' | 'retention'
+type AdminPanel = 'users' | 'direct' | 'group' | 'appearance' | 'retention'
 type RoomType = 'group' | 'direct'
 type AttachmentKind = 'image' | 'file'
 type MobileTab = 'friends' | 'chats' | 'news' | 'calls'
@@ -110,6 +110,8 @@ type ChatRoom = {
   members: string
   unread: number
   accent: string
+  avatarURL: string
+  avatarPath: string
   status: string
   type: RoomType
   retentionPolicy: RetentionPolicy
@@ -160,6 +162,9 @@ type StoredRoom = {
   subtitle?: unknown
   status?: unknown
   type?: unknown
+  accent?: unknown
+  avatarURL?: unknown
+  avatarPath?: unknown
   retentionPolicy?: unknown
   participantIds?: unknown
 }
@@ -180,6 +185,7 @@ const timeFormatter = new Intl.DateTimeFormat('ko-KR', {
 })
 
 const roomAccents = ['#06c755', '#4f7cff', '#ffb224', '#f25f5c', '#6f7bd9']
+const roomColorSwatches = ['#06c755', '#4f7cff', '#ffb224', '#f25f5c', '#6f7bd9', '#18a999']
 
 const roleCopy: Record<UserRole, string> = {
   user: '일반인',
@@ -250,6 +256,16 @@ const createProfileImagePath = (userId: string, fileName: string) => {
       : `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
   return `profileImages/${userId}/${uniqueId}-${safeName}`
+}
+
+const createRoomImagePath = (roomId: string, userId: string, fileName: string) => {
+  const safeName = sanitizeStorageName(fileName)
+  const uniqueId =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+  return `roomImages/${roomId}/${userId}/${uniqueId}-${safeName}`
 }
 
 const getFallbackNickname = (email: string) => {
@@ -415,10 +431,14 @@ function App() {
   const [groupName, setGroupName] = useState('')
   const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([])
   const [retentionRoomId, setRetentionRoomId] = useState('')
+  const [appearanceRoomId, setAppearanceRoomId] = useState('')
+  const [isRoomImageUploading, setIsRoomImageUploading] = useState(false)
+  const [roomImageProgress, setRoomImageProgress] = useState(0)
   const lastMarkedReadRef = useRef('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
   const profileImageInputRef = useRef<HTMLInputElement | null>(null)
+  const roomImageInputRef = useRef<HTMLInputElement | null>(null)
   const dragDepthRef = useRef(0)
 
   const isAdmin = authSession?.role === 'admin'
@@ -438,9 +458,22 @@ function App() {
     [chatRooms],
   )
 
+  const groupRooms = useMemo(
+    () => chatRooms.filter((room) => room.type === 'group'),
+    [chatRooms],
+  )
+
   const retentionTargetRoom = useMemo(
     () => chatRooms.find((room) => room.id === retentionRoomId) ?? chatRooms[0],
     [chatRooms, retentionRoomId],
+  )
+
+  const appearanceTargetRoom = useMemo(
+    () =>
+      groupRooms.find((room) => room.id === appearanceRoomId) ??
+      (activeRoom?.type === 'group' ? activeRoom : undefined) ??
+      groupRooms[0],
+    [activeRoom, appearanceRoomId, groupRooms],
   )
 
   const manageableUsers = useMemo(
@@ -521,6 +554,7 @@ function App() {
         setMobileTab('chats')
         setIsMobileChatOpen(false)
         setRetentionRoomId('')
+        setAppearanceRoomId('')
         setAuthReady(true)
         return
       }
@@ -585,7 +619,9 @@ function App() {
                     : '관리자가 만든 단톡방',
               members: `${Math.max(participantIds.length, 1)}명`,
               unread: 0,
-              accent: getRoomAccent(index + 1),
+              accent: typeof data.accent === 'string' ? data.accent : getRoomAccent(index + 1),
+              avatarURL: typeof data.avatarURL === 'string' ? data.avatarURL : '',
+              avatarPath: typeof data.avatarPath === 'string' ? data.avatarPath : '',
               status: typeof data.status === 'string' ? data.status : '대화 가능',
               type,
               retentionPolicy: normalizeRetentionPolicy(data.retentionPolicy),
@@ -1167,6 +1203,7 @@ function App() {
       setMobileTab('chats')
       setIsMobileChatOpen(false)
       setRetentionRoomId('')
+      setAppearanceRoomId('')
     } catch (error) {
       setSettingsError(getAuthErrorMessage(error))
     } finally {
@@ -1184,6 +1221,7 @@ function App() {
     setMobileTab('chats')
     setIsMobileChatOpen(false)
     setRetentionRoomId('')
+    setAppearanceRoomId('')
 
     if (isFirebaseConfigured && auth) {
       await signOut(auth)
@@ -1200,6 +1238,7 @@ function App() {
     setMobileTab('chats')
     setIsMobileChatOpen(false)
     setRetentionRoomId('')
+    setAppearanceRoomId('')
     setConnectionState('error')
   }
 
@@ -1361,6 +1400,7 @@ function App() {
       setGroupName('')
       setActiveRoomId(roomDoc.id)
       setRetentionRoomId(roomDoc.id)
+      setAppearanceRoomId(roomDoc.id)
       setMobileTab('chats')
       setIsMobileChatOpen(true)
       setConnectionState('connecting')
@@ -1460,6 +1500,146 @@ function App() {
       setAdminNotice(`${targetRoom.name} 삭제 정책을 ${retentionCopy[nextPolicy]}로 변경했습니다.`)
     } catch {
       setAdminNotice('삭제 정책을 변경하지 못했습니다.')
+    }
+  }
+
+  const uploadRoomImage = (file: File, path: string) =>
+    new Promise<UploadTaskSnapshot>((resolve, reject) => {
+      if (!fileStorage) {
+        reject(new Error('File upload is not available.'))
+        return
+      }
+
+      const task = uploadBytesResumable(storageRef(fileStorage, path), file, {
+        contentType: file.type,
+        customMetadata: {
+          uploadedBy: authSession?.uid ?? '',
+          purpose: 'room',
+        },
+      })
+
+      task.on(
+        'state_changed',
+        (snapshot) => {
+          const progress =
+            snapshot.totalBytes > 0
+              ? Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)
+              : 0
+
+          setRoomImageProgress(progress)
+        },
+        reject,
+        () => resolve(task.snapshot),
+      )
+    })
+
+  const handleRoomImageInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+
+    event.target.value = ''
+
+    if (!file) {
+      return
+    }
+
+    if (!authSession || !isAdmin || !db || !fileStorage || !appearanceTargetRoom) {
+      setAdminNotice('단톡방 이미지를 변경할 수 없습니다.')
+      return
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setAdminNotice('이미지 파일만 등록할 수 있습니다.')
+      return
+    }
+
+    if (file.size > maxProfileImageBytes) {
+      setAdminNotice('단톡방 이미지는 5MB 이하만 등록할 수 있습니다.')
+      return
+    }
+
+    setAdminNotice('')
+    setIsRoomImageUploading(true)
+    setRoomImageProgress(0)
+
+    try {
+      const path = createRoomImagePath(appearanceTargetRoom.id, authSession.uid, file.name)
+      const snapshot = await uploadRoomImage(file, path)
+      const avatarURL = await getDownloadURL(snapshot.ref)
+      const previousAvatarPath = appearanceTargetRoom.avatarPath
+
+      await setDoc(
+        doc(db, 'rooms', appearanceTargetRoom.id),
+        {
+          avatarURL,
+          avatarPath: path,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      )
+      setAppearanceRoomId(appearanceTargetRoom.id)
+      setRoomImageProgress(100)
+      setAdminNotice(`${appearanceTargetRoom.name} 이미지를 변경했습니다.`)
+
+      if (previousAvatarPath) {
+        void deleteObject(storageRef(fileStorage, previousAvatarPath)).catch(() => undefined)
+      }
+    } catch {
+      setAdminNotice('단톡방 이미지를 변경하지 못했습니다.')
+    } finally {
+      setIsRoomImageUploading(false)
+    }
+  }
+
+  const handleUpdateRoomAccent = async (roomId: string, nextAccent: string) => {
+    const targetRoom = groupRooms.find((room) => room.id === roomId)
+
+    if (!isAdmin || !targetRoom || !db) {
+      setAdminNotice('단톡방 색상을 변경할 수 없습니다.')
+      return
+    }
+
+    try {
+      await setDoc(
+        doc(db, 'rooms', roomId),
+        {
+          accent: nextAccent,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      )
+      setAppearanceRoomId(roomId)
+      setAdminNotice(`${targetRoom.name} 색상을 변경했습니다.`)
+    } catch {
+      setAdminNotice('단톡방 색상을 변경하지 못했습니다.')
+    }
+  }
+
+  const handleClearRoomImage = async (roomId: string) => {
+    const targetRoom = groupRooms.find((room) => room.id === roomId)
+
+    if (!isAdmin || !targetRoom || !db) {
+      setAdminNotice('단톡방 이미지를 제거할 수 없습니다.')
+      return
+    }
+
+    try {
+      await setDoc(
+        doc(db, 'rooms', roomId),
+        {
+          avatarURL: '',
+          avatarPath: '',
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      )
+      setAppearanceRoomId(roomId)
+      setAdminNotice(`${targetRoom.name} 이미지를 제거했습니다.`)
+
+      if (targetRoom.avatarPath && fileStorage) {
+        void deleteObject(storageRef(fileStorage, targetRoom.avatarPath)).catch(() => undefined)
+      }
+    } catch {
+      setAdminNotice('단톡방 이미지를 제거하지 못했습니다.')
     }
   }
 
@@ -1831,8 +2011,19 @@ function App() {
     )
   }
 
+  const renderRoomAvatar = (room: ChatRoom | undefined, className = 'avatar') => {
+    const roomName = room?.name ?? 'G'
+
+    return (
+      <span className={className} style={{ backgroundColor: room?.accent ?? '#7a8a84' }}>
+        {room?.avatarURL ? <img src={room.avatarURL} alt={roomName} /> : roomName.slice(0, 1)}
+      </span>
+    )
+  }
+
   const renderAdminConsole = (variant: 'desktop' | 'mobile') => {
     const selectedRetentionRoomId = retentionTargetRoom?.id ?? ''
+    const selectedAppearanceRoomId = appearanceTargetRoom?.id ?? ''
 
     return (
       <div className={`admin-console is-${variant}`}>
@@ -1857,6 +2048,13 @@ function App() {
             onClick={() => openAdminPanel('group')}
           >
             단톡
+          </button>
+          <button
+            className={adminPanel === 'appearance' ? 'is-active' : ''}
+            type="button"
+            onClick={() => openAdminPanel('appearance')}
+          >
+            꾸미기
           </button>
           <button
             className={adminPanel === 'retention' ? 'is-active' : ''}
@@ -1984,6 +2182,73 @@ function App() {
             <p className="retention-note">
               기본값은 1일 후 삭제입니다. 변경한 정책은 새로 저장되는 메시지부터 적용됩니다.
             </p>
+          </div>
+        )}
+
+        {adminPanel === 'appearance' && (
+          <div className="admin-form room-appearance-form">
+            <label className="field">
+              <span>꾸밀 단톡방</span>
+              <select
+                value={selectedAppearanceRoomId}
+                onChange={(event) => setAppearanceRoomId(event.target.value)}
+                disabled={groupRooms.length === 0}
+              >
+                {groupRooms.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {room.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {appearanceTargetRoom ? (
+              <>
+                <div className="room-appearance-card">
+                  {renderRoomAvatar(appearanceTargetRoom, 'profile-avatar room-avatar-preview')}
+                  <div>
+                    <strong>{appearanceTargetRoom.name}</strong>
+                    <span>{appearanceTargetRoom.avatarURL ? '이미지 사용 중' : '색상 사용 중'}</span>
+                  </div>
+                </div>
+
+                <div className="appearance-actions">
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() => roomImageInputRef.current?.click()}
+                    disabled={isRoomImageUploading}
+                  >
+                    {isRoomImageUploading ? `업로드 중 ${roomImageProgress}%` : '이미지 변경'}
+                  </button>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => void handleClearRoomImage(appearanceTargetRoom.id)}
+                    disabled={!appearanceTargetRoom.avatarURL || isRoomImageUploading}
+                  >
+                    이미지 제거
+                  </button>
+                </div>
+
+                <div className="color-swatches" aria-label="단톡방 색상">
+                  {roomColorSwatches.map((color) => (
+                    <button
+                      className={appearanceTargetRoom.accent === color ? 'is-active' : ''}
+                      key={color}
+                      type="button"
+                      onClick={() => void handleUpdateRoomAccent(appearanceTargetRoom.id, color)}
+                      aria-label={`${color} 색상`}
+                      title={color}
+                    >
+                      <span style={{ backgroundColor: color }} />
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="retention-note">꾸밀 단톡방이 없습니다.</p>
+            )}
           </div>
         )}
       </div>
@@ -2129,6 +2394,10 @@ function App() {
               <Plus size={16} />
               단톡
             </button>
+            <button type="button" onClick={() => openAdminPanel('appearance')}>
+              <ImageIcon size={16} />
+              꾸미기
+            </button>
             <button type="button" onClick={() => openAdminPanel('retention')}>
               <Trash2 size={16} />
               삭제
@@ -2151,9 +2420,7 @@ function App() {
                 type="button"
                 onClick={() => handleSelectRoom(room.id)}
               >
-                <span className="avatar" style={{ backgroundColor: room.accent }}>
-                  {room.name.slice(0, 1)}
-                </span>
+                {renderRoomAvatar(room)}
                 <span className="room-copy">
                   <span className="room-name">
                     {room.name}
@@ -2204,9 +2471,7 @@ function App() {
                 type="button"
                 onClick={() => handleSelectRoom(room.id)}
               >
-                <span className="avatar" style={{ backgroundColor: room.accent }}>
-                  {room.name.slice(0, 1)}
-                </span>
+                {renderRoomAvatar(room)}
                 <span className="mobile-page-copy">
                   <strong>{room.name}</strong>
                   <small>{room.status}</small>
@@ -2257,9 +2522,7 @@ function App() {
                 type="button"
                 onClick={() => handleSelectRoom(room.id)}
               >
-                <span className="avatar" style={{ backgroundColor: room.accent }}>
-                  <Phone size={18} />
-                </span>
+                {renderRoomAvatar(room)}
                 <span className="mobile-page-copy">
                   <strong>{room.name}</strong>
                   <small>{room.status}</small>
@@ -2300,12 +2563,7 @@ function App() {
             >
               <ArrowLeft size={20} />
             </button>
-            <span
-              className="avatar large"
-              style={{ backgroundColor: activeRoom?.accent ?? '#7a8a84' }}
-            >
-              {(activeRoom?.name ?? 'G').slice(0, 1)}
-            </span>
+            {renderRoomAvatar(activeRoom, 'avatar large')}
             <div>
               <h2>{activeRoom?.name ?? '채팅방 없음'}</h2>
               <p>
@@ -2503,12 +2761,7 @@ function App() {
           </button>
         </div>
         <div className="profile-card">
-          <span
-            className="profile-avatar"
-            style={{ backgroundColor: activeRoom?.accent ?? '#7a8a84' }}
-          >
-            {(activeRoom?.name ?? 'G').slice(0, 1)}
-          </span>
+          {renderRoomAvatar(activeRoom, 'profile-avatar')}
           <h2>{activeRoom?.name ?? '채팅방 없음'}</h2>
           <p>{activeRoom?.subtitle ?? '채팅방 정보가 여기에 표시됩니다.'}</p>
           <div className="profile-actions">
@@ -2579,6 +2832,14 @@ function App() {
           <span>통화</span>
         </button>
       </nav>
+
+      <input
+        ref={roomImageInputRef}
+        className="visually-hidden"
+        type="file"
+        accept="image/*"
+        onChange={handleRoomImageInputChange}
+      />
 
       {isSettingsOpen && (
         <div className="settings-backdrop" role="presentation">

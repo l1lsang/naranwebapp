@@ -518,7 +518,7 @@ h3 {
 
 .admin-quick-actions {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -629,6 +629,15 @@ h3 {
   color: #12342d;
   background: #dce9e4;
   font-size: 13px;
+}
+
+.avatar img,
+.profile-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  display: block;
 }
 
 .room-copy {
@@ -1194,7 +1203,7 @@ h3 {
   border-radius: 8px;
   background: #f3f6f5;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 4px;
   padding: 4px;
 }
@@ -1335,6 +1344,93 @@ h3 {
   font-size: 12px;
   font-weight: 750;
   line-height: 1.45;
+}
+
+.room-appearance-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+}
+
+.room-avatar-preview {
+  width: 62px;
+  height: 62px;
+  font-size: 22px;
+}
+
+.room-appearance-card div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.room-appearance-card strong,
+.room-appearance-card span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-appearance-card strong {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.room-appearance-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.appearance-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.secondary-button {
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #ffffff;
+  font-weight: 850;
+}
+
+.secondary-button:not(:disabled):hover {
+  background: #f3f6f5;
+}
+
+.color-swatches {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.color-swatches button {
+  min-width: 0;
+  height: 34px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: #f3f6f5;
+  display: grid;
+  place-items: center;
+  padding: 3px;
+}
+
+.color-swatches button.is-active {
+  border-color: var(--line-green);
+}
+
+.color-swatches span {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
 }
 
 .member-check {
