@@ -118,6 +118,16 @@ type ManagedUser = {
   photoURL?: string
 }
 
+type RoomParticipant = {
+  id: string
+  email: string
+  nickname: string
+  role?: UserRole
+  status?: UserStatus
+  photoURL: string
+  isCurrentUser: boolean
+}
+
 type ChatRoom = {
   id: string
   name: string
@@ -475,6 +485,16 @@ const getDirectPeerId = (room: ChatRoom | undefined, currentUserId: string | und
   return room.participantIds?.find((participantId) => participantId !== currentUserId) ?? ''
 }
 
+const getRoomParticipantIds = (room: ChatRoom | undefined) => {
+  if (!room) {
+    return []
+  }
+
+  return Array.from(
+    new Set([...(room.participantIds ?? []), ...Object.keys(room.participantProfiles)]),
+  ).filter((participantId) => participantId.length > 0)
+}
+
 const authModeCopy: Record<AuthMode, string> = {
   login: '로그인',
   signup: '회원가입',
@@ -582,6 +602,8 @@ function App() {
   const [isProfileImageUploading, setIsProfileImageUploading] = useState(false)
   const [profileImageProgress, setProfileImageProgress] = useState(0)
   const [isRoomSettingsOpen, setIsRoomSettingsOpen] = useState(false)
+  const [selectedRoomProfileId, setSelectedRoomProfileId] = useState('')
+  const [roomAddMemberIds, setRoomAddMemberIds] = useState<string[]>([])
   const [callMode, setCallMode] = useState<CallMode | null>(null)
   const [callRoomId, setCallRoomId] = useState('')
   const [activeCallId, setActiveCallId] = useState('')
@@ -668,6 +690,8 @@ function App() {
     [authSession?.uid, managedUsers],
   )
 
+  const activeRoomParticipantIds = useMemo(() => getRoomParticipantIds(activeRoom), [activeRoom])
+
   const userProfileById = useMemo(() => {
     const nextProfiles: Record<string, ParticipantProfile> = {}
 
@@ -709,6 +733,50 @@ function App() {
       }, {}),
     [userProfileById],
   )
+
+  const activeRoomParticipants = useMemo<RoomParticipant[]>(() => {
+    if (!activeRoom) {
+      return []
+    }
+
+    return activeRoomParticipantIds.map((participantId) => {
+      const managedUser = managedUsers.find((user) => user.id === participantId)
+      const profile = userProfileById[participantId] ?? activeRoom.participantProfiles[participantId]
+      const isCurrentUser = participantId === authSession?.uid
+
+      return {
+        id: participantId,
+        email: managedUser?.email ?? (isCurrentUser ? authSession?.email ?? '' : ''),
+        nickname:
+          managedUser?.nickname ??
+          profile?.nickname ??
+          (isCurrentUser ? authSession?.nickname ?? '' : '알 수 없는 유저'),
+        role: managedUser?.role ?? (isCurrentUser ? authSession?.role : undefined),
+        status: managedUser?.status ?? (isCurrentUser ? authSession?.status : undefined),
+        photoURL: managedUser?.photoURL ?? profile?.photoURL ?? '',
+        isCurrentUser,
+      }
+    })
+  }, [activeRoom, activeRoomParticipantIds, authSession, managedUsers, userProfileById])
+
+  const selectedRoomParticipant = useMemo(
+    () =>
+      activeRoomParticipants.find((participant) => participant.id === selectedRoomProfileId) ??
+      activeRoomParticipants[0],
+    [activeRoomParticipants, selectedRoomProfileId],
+  )
+
+  const roomAddableUsers = useMemo(() => {
+    if (!activeRoom) {
+      return []
+    }
+
+    const participantIds = new Set(activeRoomParticipantIds)
+
+    return managedUsers.filter(
+      (user) => !participantIds.has(user.id) && user.status === 'active',
+    )
+  }, [activeRoom, activeRoomParticipantIds, managedUsers])
 
   const getRoomDisplay = useCallback((room: ChatRoom | undefined) => {
     if (!room) {
@@ -1742,6 +1810,8 @@ function App() {
     setRetentionRoomId('')
     setAppearanceRoomId('')
     setIsRoomSettingsOpen(false)
+    setSelectedRoomProfileId('')
+    setRoomAddMemberIds([])
     setPrivacyShieldReason('')
     setCallMode(null)
     setCallRoomId('')
@@ -1763,6 +1833,8 @@ function App() {
     setRetentionRoomId('')
     setAppearanceRoomId('')
     setIsRoomSettingsOpen(false)
+    setSelectedRoomProfileId('')
+    setRoomAddMemberIds([])
     setCallMode(null)
     setCallRoomId('')
     setConnectionState('error')
@@ -1776,6 +1848,8 @@ function App() {
 
     setAdminPanel(panel)
     setAdminNotice('')
+    setMobileTab('friends')
+    setIsMobileChatOpen(false)
   }
 
   const handleSelectRoom = (roomId: string) => {
@@ -1783,6 +1857,8 @@ function App() {
 
     setActiveRoomId(roomId)
     setRetentionRoomId(roomId)
+    setSelectedRoomProfileId('')
+    setRoomAddMemberIds([])
     if (selectedRoom?.type === 'group') {
       setAppearanceRoomId(roomId)
     }
@@ -1811,7 +1887,7 @@ function App() {
     setDraft('')
   }
 
-  const openRoomSettings = (roomId = activeRoomId) => {
+  const openRoomSettings = (roomId = activeRoomId, profileId = '') => {
     const targetRoom = chatRooms.find((room) => room.id === roomId)
 
     if (!targetRoom) {
@@ -1820,6 +1896,8 @@ function App() {
 
     setActiveRoomId(targetRoom.id)
     setRetentionRoomId(targetRoom.id)
+    setSelectedRoomProfileId(profileId || getRoomParticipantIds(targetRoom)[0] || '')
+    setRoomAddMemberIds([])
     if (targetRoom.type === 'group') {
       setAppearanceRoomId(targetRoom.id)
     }
@@ -1832,6 +1910,7 @@ function App() {
     }
 
     setIsRoomSettingsOpen(false)
+    setRoomAddMemberIds([])
   }
 
   const setLocalMediaStream = (stream: MediaStream | null) => {
@@ -2346,6 +2425,14 @@ function App() {
     )
   }
 
+  const toggleRoomAddMember = (userId: string) => {
+    setRoomAddMemberIds((currentIds) =>
+      currentIds.includes(userId)
+        ? currentIds.filter((id) => id !== userId)
+        : [...currentIds, userId],
+    )
+  }
+
   const handleCreateGroupChat = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
@@ -2408,6 +2495,68 @@ function App() {
       setAdminNotice(`${roomName} 단톡방을 만들었습니다.`)
     } catch {
       setAdminNotice('단톡방을 만들지 못했습니다. 권한을 확인해주세요.')
+    }
+  }
+
+  const handleAddUsersToRoom = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+
+    if (!authSession || !isAdmin || !activeRoom) {
+      setAdminNotice('관리자만 톡방에 유저를 추가할 수 있습니다.')
+      return
+    }
+
+    const addableUserIds = new Set(roomAddableUsers.map((user) => user.id))
+    const selectedUserIds = roomAddMemberIds.filter((userId) => addableUserIds.has(userId))
+    const selectedUsers = roomAddableUsers.filter((user) => selectedUserIds.includes(user.id))
+
+    if (selectedUsers.length === 0) {
+      setAdminNotice('추가할 유저를 선택해주세요.')
+      return
+    }
+
+    const nextParticipantIds = Array.from(
+      new Set([...activeRoomParticipantIds, ...selectedUserIds]),
+    )
+    const participantProfiles = {
+      ...activeRoom.participantProfiles,
+      ...getParticipantProfilesForIds(nextParticipantIds),
+    }
+    const roomDisplay = getRoomDisplay(activeRoom)
+    const roomUpdate: Record<string, unknown> = {
+      participantIds: nextParticipantIds,
+      participantProfiles,
+      updatedAt: serverTimestamp(),
+    }
+
+    if (activeRoom.type === 'direct') {
+      roomUpdate.type = 'group'
+      roomUpdate.status = '단톡'
+      roomUpdate.name = `${roomDisplay.name} 외 ${Math.max(nextParticipantIds.length - 1, 1)}명`
+      roomUpdate.subtitle = `${authSession.nickname}님이 유저를 추가한 단톡방`
+      roomUpdate.avatarURL = ''
+      roomUpdate.avatarPath = ''
+    }
+
+    try {
+      if (!isFirebaseConfigured || !db) {
+        setConnectionState('error')
+        setAdminNotice('연결 상태를 확인해주세요.')
+        return
+      }
+
+      await setDoc(doc(db, 'rooms', activeRoom.id), roomUpdate, { merge: true })
+
+      if (activeRoom.type === 'direct') {
+        setAppearanceRoomId(activeRoom.id)
+      }
+
+      setRoomAddMemberIds([])
+      setAdminNotice(
+        `${selectedUsers.map((user) => user.nickname).join(', ')}님을 ${roomDisplay.name}에 추가했습니다.`,
+      )
+    } catch {
+      setAdminNotice('유저를 톡방에 추가하지 못했습니다. 권한을 확인해주세요.')
     }
   }
 
@@ -3032,6 +3181,141 @@ function App() {
     )
   }
 
+  const getParticipantMeta = (participant: RoomParticipant) => {
+    const statusText = participant.status ? statusCopy[participant.status] : '참여자'
+
+    if (participant.email) {
+      return `${participant.email} · ${statusText}`
+    }
+
+    if (participant.role) {
+      return `${roleCopy[participant.role]} · ${statusText}`
+    }
+
+    return statusText
+  }
+
+  const renderRoomParticipantList = (variant: 'settings' | 'detail') => {
+    if (!activeRoom || activeRoomParticipants.length === 0) {
+      return null
+    }
+
+    const visibleParticipants =
+      variant === 'detail' ? activeRoomParticipants.slice(0, 4) : activeRoomParticipants
+
+    return (
+      <div className={`room-member-list is-${variant}`}>
+        {visibleParticipants.map((participant) => {
+          const isSelected = selectedRoomParticipant?.id === participant.id
+
+          return (
+            <button
+              className={`room-member-row ${isSelected ? 'is-active' : ''}`}
+              key={participant.id}
+              type="button"
+              onClick={() => {
+                setSelectedRoomProfileId(participant.id)
+
+                if (variant === 'detail') {
+                  openRoomSettings(activeRoom.id, participant.id)
+                }
+              }}
+            >
+              {renderUserAvatar(participant.nickname, participant.photoURL)}
+              <span className="room-member-copy">
+                <strong>
+                  {participant.nickname}
+                  {participant.isCurrentUser ? ' · 나' : ''}
+                </strong>
+                <small>{getParticipantMeta(participant)}</small>
+              </span>
+              <Info size={16} />
+            </button>
+          )
+        })}
+
+        {variant === 'detail' && activeRoomParticipants.length > visibleParticipants.length && (
+          <button
+            className="room-member-more"
+            type="button"
+            onClick={() => openRoomSettings(activeRoom.id)}
+          >
+            전체 {activeRoomParticipants.length}명 보기
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  const renderSelectedRoomProfile = () => {
+    if (!selectedRoomParticipant) {
+      return null
+    }
+
+    return (
+      <div className="room-profile-preview">
+        {renderUserAvatar(
+          selectedRoomParticipant.nickname,
+          selectedRoomParticipant.photoURL,
+          'profile-avatar room-profile-avatar',
+        )}
+        <div>
+          <strong>{selectedRoomParticipant.nickname}</strong>
+          <span>{selectedRoomParticipant.email || '공개된 이메일 없음'}</span>
+          <small>
+            {selectedRoomParticipant.role ? roleCopy[selectedRoomParticipant.role] : '참여자'} ·{' '}
+            {selectedRoomParticipant.status ? statusCopy[selectedRoomParticipant.status] : '상태 정보 없음'}
+          </small>
+        </div>
+      </div>
+    )
+  }
+
+  const renderRoomAddMemberForm = () => {
+    if (!isAdmin || !activeRoom) {
+      return null
+    }
+
+    return (
+      <section className="settings-section">
+        <div className="settings-section-title">
+          <Plus size={18} />
+          <h3>유저 추가</h3>
+        </div>
+
+        {activeRoom.type === 'direct' && (
+          <p className="retention-note">1:1 톡방에 유저를 추가하면 단톡방으로 전환됩니다.</p>
+        )}
+
+        {roomAddableUsers.length > 0 ? (
+          <form className="admin-form" onSubmit={handleAddUsersToRoom}>
+            <div className="group-member-list room-add-member-list">
+              {roomAddableUsers.map((user) => (
+                <label className="member-check" key={user.id}>
+                  <input
+                    type="checkbox"
+                    checked={roomAddMemberIds.includes(user.id)}
+                    onChange={() => toggleRoomAddMember(user.id)}
+                  />
+                  <span>
+                    {user.nickname}
+                    {user.id === authSession?.uid ? ' · 나' : ''}
+                  </span>
+                  <small>{roleCopy[user.role]}</small>
+                </label>
+              ))}
+            </div>
+            <button className="primary-button" type="submit" disabled={roomAddMemberIds.length === 0}>
+              선택한 유저 추가
+            </button>
+          </form>
+        ) : (
+          <p className="retention-note">추가할 수 있는 유저가 없습니다.</p>
+        )}
+      </section>
+    )
+  }
+
   const renderAdminConsole = (variant: 'desktop' | 'mobile') => {
     const selectedRetentionRoomId = retentionTargetRoom?.id ?? ''
     const selectedAppearanceRoomId = appearanceTargetRoom?.id ?? ''
@@ -3075,6 +3359,8 @@ function App() {
             삭제
           </button>
         </div>
+
+        {adminNotice && <p className="admin-notice">{adminNotice}</p>}
 
         {adminPanel === 'users' && (
           <div className="managed-user-list">
@@ -3323,6 +3609,17 @@ function App() {
               </span>
             </div>
           </div>
+
+          <section className="settings-section">
+            <div className="settings-section-title">
+              <UserRound size={18} />
+              <h3>참여자</h3>
+            </div>
+            {renderRoomParticipantList('settings')}
+            {renderSelectedRoomProfile()}
+          </section>
+
+          {renderRoomAddMemberForm()}
 
           {isAdmin ? (
             <>
@@ -3612,8 +3909,8 @@ function App() {
               className="rail-button"
               type="button"
               onClick={() => openAdminPanel('users')}
-              aria-label="관리"
-              title="관리"
+              aria-label="친구 관리"
+              title="친구 관리"
             >
               <ShieldCheck size={21} />
             </button>
@@ -3652,15 +3949,6 @@ function App() {
               </span>
             </p>
           </div>
-          <button
-            className="icon-button"
-            type="button"
-            onClick={() => openAdminPanel('direct')}
-            aria-label={isAdmin ? '대화 시작' : '대화 시작 제한'}
-            title={isAdmin ? '대화 시작' : '관리자만 대화를 시작할 수 있음'}
-          >
-            <Plus size={20} />
-          </button>
         </div>
 
         <label className="search-box">
@@ -3672,37 +3960,6 @@ function App() {
             placeholder="이름, 메시지 검색"
           />
         </label>
-
-        {isAdmin ? (
-          <div className="admin-quick-actions">
-            <button type="button" onClick={() => openAdminPanel('users')}>
-              <UserRound size={16} />
-              유저
-            </button>
-            <button type="button" onClick={() => openAdminPanel('direct')}>
-              <MessageCircle size={16} />
-              1:1
-            </button>
-            <button type="button" onClick={() => openAdminPanel('group')}>
-              <Plus size={16} />
-              단톡
-            </button>
-            <button type="button" onClick={() => openAdminPanel('appearance')}>
-              <ImageIcon size={16} />
-              꾸미기
-            </button>
-            <button type="button" onClick={() => openAdminPanel('retention')}>
-              <Trash2 size={16} />
-              삭제
-            </button>
-          </div>
-        ) : (
-          <p className="permission-note">기존 채팅방에서만 메시지를 보낼 수 있습니다.</p>
-        )}
-
-        {adminNotice && <p className="admin-notice">{adminNotice}</p>}
-
-        {isAdmin && <div className="mobile-admin-console">{renderAdminConsole('mobile')}</div>}
 
         <div className="room-list">
           {filteredRooms.length > 0 ? (
@@ -3755,6 +4012,11 @@ function App() {
               <small>내 프로필</small>
             </span>
           </button>
+          {isAdmin && (
+            <div className="mobile-admin-console friends-admin-console">
+              {renderAdminConsole('mobile')}
+            </div>
+          )}
           {mobileDirectRooms.length > 0 ? (
             mobileDirectRooms.map((room) => {
               const display = getRoomDisplay(room)
@@ -4145,6 +4407,19 @@ function App() {
             </button>
           </div>
         </div>
+
+        {activeRoom && (
+          <div className="detail-section">
+            <h3>참여자</h3>
+            {renderRoomParticipantList('detail')}
+            {isAdmin && roomAddableUsers.length > 0 && (
+              <button className="pinned-item" type="button" onClick={() => openRoomSettings()}>
+                <Plus size={18} />
+                <span>유저 추가</span>
+              </button>
+            )}
+          </div>
+        )}
 
         {isAdmin ? (
           renderAdminConsole('desktop')
