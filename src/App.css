@@ -506,22 +506,28 @@ h3 {
 
 .room-row {
   width: 100%;
-  min-height: 72px;
+  min-height: 52px;
   border-bottom: 1px solid var(--line);
   border-radius: 0;
   color: inherit;
   background: transparent;
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  padding: 10px 6px;
+  gap: 9px;
+  padding: 5px 4px;
   text-align: left;
 }
 
 .room-row:hover,
 .room-row.is-active {
   background: #eef8f2;
+}
+
+.room-row .avatar {
+  width: 36px;
+  height: 36px;
+  font-size: 14px;
 }
 
 .avatar,
