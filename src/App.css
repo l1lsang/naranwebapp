@@ -780,6 +780,31 @@ h3 {
   border-top: 1px solid var(--line);
 }
 
+.news-category-tabs {
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 9px 2px;
+}
+
+.news-category-tabs button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: #f3f6f5;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.news-category-tabs button.is-active {
+  color: #ffffff;
+  background: var(--line-green);
+}
+
 .news-source-link {
   border-bottom: 1px solid var(--line);
   color: var(--line-green);
@@ -2192,14 +2217,39 @@ h3 {
   .room-panel,
   .mobile-tab-page {
     flex-direction: column;
-    gap: 18px;
-    padding: 22px 16px;
+    gap: 10px;
+    padding: 14px 10px;
   }
 
   .room-list,
   .mobile-page-list {
     min-height: 0;
     flex: 1;
+  }
+
+  .room-row {
+    min-height: 44px;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    gap: 7px;
+    padding: 3px 2px;
+  }
+
+  .room-row .avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 12px;
+  }
+
+  .room-copy {
+    gap: 1px;
+  }
+
+  .room-name {
+    font-size: 14px;
+  }
+
+  .room-subtitle {
+    font-size: 12px;
   }
 
   .mobile-admin-console {

@@ -13,7 +13,26 @@ export default defineConfig({
       '/api/hankyung-rss': {
         target: 'https://www.hankyung.com',
         changeOrigin: true,
-        rewrite: () => '/feed/all-news',
+        rewrite: (path) => {
+          const feedPath = new URL(path, 'http://localhost').searchParams.get('feed') ?? 'all-news'
+          const allowedFeedPaths = new Set([
+            'all-news',
+            'finance',
+            'economy',
+            'realestate',
+            'it',
+            'politics',
+            'international',
+            'society',
+            'life',
+            'opinion',
+            'sports',
+            'entertainment',
+            'video',
+          ])
+
+          return `/feed/${allowedFeedPaths.has(feedPath) ? feedPath : 'all-news'}`
+        },
       },
     },
   },

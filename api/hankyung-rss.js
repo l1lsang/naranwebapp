@@ -1,4 +1,26 @@
-const hankyungRssUrl = 'https://www.hankyung.com/feed/all-news'
+const feedPaths = new Set([
+  'all-news',
+  'finance',
+  'economy',
+  'realestate',
+  'it',
+  'politics',
+  'international',
+  'society',
+  'life',
+  'opinion',
+  'sports',
+  'entertainment',
+  'video',
+])
+
+const getFeedUrl = (request) => {
+  const host = request.headers.host || 'localhost'
+  const url = new URL(request.url || '/', `https://${host}`)
+  const feedPath = url.searchParams.get('feed') || 'all-news'
+
+  return `https://www.hankyung.com/feed/${feedPaths.has(feedPath) ? feedPath : 'all-news'}`
+}
 
 const textFromTag = (item, tagName) => {
   const match = item.match(new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i'))
@@ -46,6 +68,7 @@ export default async function handler(_request, response) {
   }
 
   try {
+    const hankyungRssUrl = getFeedUrl(_request)
     const rssResponse = await fetch(hankyungRssUrl, {
       headers: {
         accept: 'application/rss+xml, application/xml, text/xml',

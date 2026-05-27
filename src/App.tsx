@@ -136,6 +136,13 @@ type NewsItem = {
   publishedAt: string
 }
 
+type NewsCategory = {
+  id: string
+  label: string
+  feedPath: string
+  feedUrl: string
+}
+
 type ChatRoom = {
   id: string
   name: string
@@ -244,7 +251,29 @@ const timeFormatter = new Intl.DateTimeFormat('ko-KR', {
 
 const roomAccents = ['#06c755', '#4f7cff', '#ffb224', '#f25f5c', '#6f7bd9']
 const roomColorSwatches = ['#06c755', '#4f7cff', '#ffb224', '#f25f5c', '#6f7bd9', '#18a999']
-const hankyungRssUrl = 'https://www.hankyung.com/feed/all-news'
+const hankyungFeedBaseUrl = 'https://www.hankyung.com/feed'
+const hankyungNewsCategories: NewsCategory[] = [
+  { id: 'all-news', label: '전체', feedPath: 'all-news', feedUrl: `${hankyungFeedBaseUrl}/all-news` },
+  { id: 'finance', label: '증권', feedPath: 'finance', feedUrl: `${hankyungFeedBaseUrl}/finance` },
+  { id: 'economy', label: '경제', feedPath: 'economy', feedUrl: `${hankyungFeedBaseUrl}/economy` },
+  { id: 'realestate', label: '부동산', feedPath: 'realestate', feedUrl: `${hankyungFeedBaseUrl}/realestate` },
+  { id: 'it', label: 'IT', feedPath: 'it', feedUrl: `${hankyungFeedBaseUrl}/it` },
+  { id: 'politics', label: '정치', feedPath: 'politics', feedUrl: `${hankyungFeedBaseUrl}/politics` },
+  { id: 'international', label: '국제', feedPath: 'international', feedUrl: `${hankyungFeedBaseUrl}/international` },
+  { id: 'society', label: '사회', feedPath: 'society', feedUrl: `${hankyungFeedBaseUrl}/society` },
+  { id: 'life', label: '생활', feedPath: 'life', feedUrl: `${hankyungFeedBaseUrl}/life` },
+  { id: 'opinion', label: '오피니언', feedPath: 'opinion', feedUrl: `${hankyungFeedBaseUrl}/opinion` },
+  { id: 'sports', label: '스포츠', feedPath: 'sports', feedUrl: `${hankyungFeedBaseUrl}/sports` },
+  {
+    id: 'entertainment',
+    label: '연예',
+    feedPath: 'entertainment',
+    feedUrl: `${hankyungFeedBaseUrl}/entertainment`,
+  },
+  { id: 'video', label: 'VIDEO', feedPath: 'video', feedUrl: `${hankyungFeedBaseUrl}/video` },
+]
+const defaultNewsCategoryId = hankyungNewsCategories[0].id
+const hankyungRssUrl = hankyungNewsCategories[0].feedUrl
 
 const roleCopy: Record<UserRole, string> = {
   user: '일반인',
@@ -722,6 +751,7 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('')
   const [remoteMessages, setRemoteMessages] = useState<ChatMessage[]>([])
   const [readReceipts, setReadReceipts] = useState<ReadReceipt[]>([])
+  const [activeNewsCategoryId, setActiveNewsCategoryId] = useState(defaultNewsCategoryId)
   const [newsItems, setNewsItems] = useState<NewsItem[]>([])
   const [isNewsLoading, setIsNewsLoading] = useState(true)
   const [newsError, setNewsError] = useState('')
@@ -959,6 +989,13 @@ function App() {
     [activeRoom, authSession, remoteMessages],
   )
 
+  const activeNewsCategory = useMemo(
+    () =>
+      hankyungNewsCategories.find((category) => category.id === activeNewsCategoryId) ??
+      hankyungNewsCategories[0],
+    [activeNewsCategoryId],
+  )
+
   const readBadgeByMessageId = useMemo(() => {
     const nextBadges: Record<string, number> = {}
 
@@ -996,13 +1033,15 @@ function App() {
     const loadHankyungNews = async () => {
       setIsNewsLoading(true)
       setNewsError('')
+      setNewsItems([])
 
+      const feedUrl = activeNewsCategory.feedUrl
       const rssSources = [
-        '/api/hankyung-rss',
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(hankyungRssUrl)}`,
-        `https://api.allorigins.win/get?url=${encodeURIComponent(hankyungRssUrl)}`,
-        `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(hankyungRssUrl)}`,
-        hankyungRssUrl,
+        `/api/hankyung-rss?feed=${encodeURIComponent(activeNewsCategory.feedPath)}`,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}`,
+        `https://api.allorigins.win/get?url=${encodeURIComponent(feedUrl)}`,
+        `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feedUrl)}`,
+        feedUrl,
       ]
 
       for (const rssSource of rssSources) {
@@ -1042,7 +1081,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [activeNewsCategory])
 
   useEffect(() => {
     if (!authSession) {
@@ -4123,8 +4162,26 @@ function App() {
           </div>
         </div>
         <div className="mobile-page-list news-feed-list">
-          <a className="news-source-link" href={hankyungRssUrl} target="_blank" rel="noreferrer">
-            한국경제 RSS
+          <div className="news-category-tabs" role="tablist" aria-label="한국경제 RSS 테마">
+            {hankyungNewsCategories.map((category) => (
+              <button
+                className={category.id === activeNewsCategory.id ? 'is-active' : ''}
+                key={category.id}
+                type="button"
+                onClick={() => setActiveNewsCategoryId(category.id)}
+              >
+                {category.label}
+              </button>
+            ))}
+          </div>
+
+          <a
+            className="news-source-link"
+            href={activeNewsCategory.feedUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            한국경제 {activeNewsCategory.label} RSS
           </a>
 
           {isNewsLoading ? (
