@@ -10,7 +10,6 @@ import {
 } from 'react'
 import {
   ArrowLeft,
-  Bell,
   Camera,
   CheckCheck,
   Download,
@@ -3967,6 +3966,298 @@ function App() {
     )
   }
 
+  const renderChatRoomsPanel = () => (
+    <>
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">GreenTalk</p>
+          <h1>채팅</h1>
+          <p className="signed-user">
+            {authSession.nickname}
+            <span className={`role-pill is-${authSession.role}`}>
+              {roleCopy[authSession.role]}
+            </span>
+          </p>
+        </div>
+      </div>
+
+      <label className="search-box">
+        <Search size={18} />
+        <input
+          type="search"
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          placeholder="이름, 메시지 검색"
+        />
+      </label>
+
+      <div className="room-list">
+        {filteredRooms.length > 0 ? (
+          filteredRooms.map((room) => {
+            const display = getRoomDisplay(room)
+
+            return (
+              <button
+                className={`room-row ${room.id === activeRoomId ? 'is-active' : ''}`}
+                key={room.id}
+                type="button"
+                onClick={() => handleSelectRoom(room.id)}
+              >
+                {renderRoomAvatar(room)}
+                <span className="room-copy">
+                  <span className="room-name">
+                    {display.name}
+                    <small>{room.members}</small>
+                  </span>
+                  <span className="room-subtitle">{display.subtitle}</span>
+                </span>
+                {room.unread > 0 && <span className="unread-count">{room.unread}</span>}
+              </button>
+            )
+          })
+        ) : (
+          <div className="room-empty">
+            <MessageCircle size={28} />
+            <p>표시할 채팅방이 없습니다.</p>
+          </div>
+        )}
+      </div>
+    </>
+  )
+
+  const renderFriendsPanel = () => (
+    <>
+      <div className="mobile-page-heading">
+        <div>
+          <p className="eyebrow">GreenTalk</p>
+          <h1>친구</h1>
+        </div>
+        <button className="icon-button" type="button" onClick={openSettings} aria-label="내 프로필">
+          <UserRound size={20} />
+        </button>
+      </div>
+      <div className="mobile-page-list">
+        <button className="mobile-page-row" type="button" onClick={openSettings}>
+          {renderUserAvatar(authSession.nickname, authSession.photoURL, 'avatar')}
+          <span className="mobile-page-copy">
+            <strong>{authSession.nickname}</strong>
+            <small>내 프로필</small>
+          </span>
+        </button>
+        {isAdmin && (
+          <div className="mobile-admin-console friends-admin-console">
+            {renderAdminConsole('mobile')}
+          </div>
+        )}
+        {mobileDirectRooms.length > 0 ? (
+          mobileDirectRooms.map((room) => {
+            const display = getRoomDisplay(room)
+
+            return (
+              <button
+                className="mobile-page-row"
+                key={room.id}
+                type="button"
+                onClick={() => handleSelectRoom(room.id)}
+              >
+                {renderRoomAvatar(room)}
+                <span className="mobile-page-copy">
+                  <strong>{display.name}</strong>
+                  <small>{room.status}</small>
+                </span>
+              </button>
+            )
+          })
+        ) : (
+          <div className="mobile-page-empty">
+            <UserRound size={28} />
+            <p>표시할 친구가 없습니다.</p>
+          </div>
+        )}
+      </div>
+    </>
+  )
+
+  const renderNewsPanel = () => (
+    <>
+      <div className="mobile-page-heading">
+        <div>
+          <p className="eyebrow">GreenTalk</p>
+          <h1>뉴스</h1>
+        </div>
+      </div>
+      <div className="mobile-page-list news-feed-list">
+        <div className="news-category-tabs" role="tablist" aria-label="한국경제 RSS 테마">
+          {hankyungNewsCategories.map((category) => (
+            <button
+              className={category.id === activeNewsCategory.id ? 'is-active' : ''}
+              key={category.id}
+              type="button"
+              onClick={() => setActiveNewsCategoryId(category.id)}
+            >
+              {category.label}
+            </button>
+          ))}
+        </div>
+
+        <a
+          className="news-source-link"
+          href={activeNewsCategory.feedUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          한국경제 {activeNewsCategory.label} RSS
+        </a>
+
+        {isNewsLoading ? (
+          <div className="mobile-page-empty">
+            <Newspaper size={28} />
+            <p>뉴스를 불러오는 중입니다.</p>
+          </div>
+        ) : newsError ? (
+          <div className="mobile-page-empty">
+            <Newspaper size={28} />
+            <p>{newsError}</p>
+          </div>
+        ) : (
+          newsItems.map((item) => (
+            <a
+              className="mobile-news-card news-feed-item"
+              href={item.link}
+              key={item.id}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <strong>{item.title}</strong>
+              {item.summary && <p>{item.summary}</p>}
+              <small>{item.publishedAt || '한국경제'}</small>
+            </a>
+          ))
+        )}
+      </div>
+    </>
+  )
+
+  const renderCallsPanel = () => (
+    <>
+      <div className="mobile-page-heading">
+        <div>
+          <p className="eyebrow">GreenTalk</p>
+          <h1>통화</h1>
+        </div>
+      </div>
+      <div className="mobile-page-list">
+        {chatRooms.length > 0 ? (
+          chatRooms.map((room) => {
+            const display = getRoomDisplay(room)
+
+            return (
+              <div className="mobile-call-row" key={room.id}>
+                <button
+                  className="mobile-call-main"
+                  type="button"
+                  onClick={() => handleSelectRoom(room.id)}
+                >
+                  {renderRoomAvatar(room)}
+                  <span className="mobile-page-copy">
+                    <strong>{display.name}</strong>
+                    <small>{room.status}</small>
+                  </span>
+                </button>
+                <div className="mobile-call-actions">
+                  <button
+                    type="button"
+                    onClick={() => openCall('voice', room.id)}
+                    aria-label={`${display.name} 음성 채팅`}
+                    title={
+                      isAdmin && room.type === 'direct'
+                        ? '음성 채팅'
+                        : '관리자만 1:1 통화를 걸 수 있음'
+                    }
+                    disabled={!isAdmin || room.type !== 'direct'}
+                  >
+                    <Phone size={18} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openCall('video', room.id)}
+                    aria-label={`${display.name} 영상통화`}
+                    title={
+                      isAdmin && room.type === 'direct'
+                        ? '영상통화'
+                        : '관리자만 1:1 통화를 걸 수 있음'
+                    }
+                    disabled={!isAdmin || room.type !== 'direct'}
+                  >
+                    <Video size={18} />
+                  </button>
+                </div>
+              </div>
+            )
+          })
+        ) : (
+          <div className="mobile-page-empty">
+            <Phone size={28} />
+            <p>표시할 통화가 없습니다.</p>
+          </div>
+        )}
+      </div>
+    </>
+  )
+
+  const renderDesktopTabPanel = () => {
+    if (mobileTab === 'friends') {
+      return renderFriendsPanel()
+    }
+
+    if (mobileTab === 'news') {
+      return renderNewsPanel()
+    }
+
+    if (mobileTab === 'calls') {
+      return renderCallsPanel()
+    }
+
+    return renderChatRoomsPanel()
+  }
+
+  const renderDesktopTabStrip = () => (
+    <div className="desktop-tab-strip" role="tablist" aria-label="PC 탭 메뉴">
+      <button
+        className={mobileTab === 'friends' ? 'is-active' : ''}
+        type="button"
+        onClick={() => handleMobileTabChange('friends')}
+      >
+        <UserRound size={16} />
+        친구
+      </button>
+      <button
+        className={mobileTab === 'chats' ? 'is-active' : ''}
+        type="button"
+        onClick={handleBackToRoomList}
+      >
+        <MessageCircle size={16} />
+        대화
+      </button>
+      <button
+        className={mobileTab === 'news' ? 'is-active' : ''}
+        type="button"
+        onClick={() => handleMobileTabChange('news')}
+      >
+        <Newspaper size={16} />
+        뉴스
+      </button>
+      <button
+        className={mobileTab === 'calls' ? 'is-active' : ''}
+        type="button"
+        onClick={() => handleMobileTabChange('calls')}
+      >
+        <Phone size={16} />
+        통화
+      </button>
+    </div>
+  )
+
   const renderPrivacyShield = () => {
     if (!privacyShieldReason) {
       return null
@@ -4001,7 +4292,16 @@ function App() {
         </button>
         <nav className="rail-nav">
           <button
-            className="rail-button is-active"
+            className={`rail-button ${mobileTab === 'friends' ? 'is-active' : ''}`}
+            type="button"
+            onClick={() => handleMobileTabChange('friends')}
+            aria-label="친구"
+            title="친구"
+          >
+            <UserRound size={21} />
+          </button>
+          <button
+            className={`rail-button ${mobileTab === 'chats' ? 'is-active' : ''}`}
             type="button"
             onClick={handleBackToRoomList}
             aria-label="채팅"
@@ -4009,21 +4309,24 @@ function App() {
           >
             <MessageCircle size={21} />
           </button>
-          <button className="rail-button" type="button" aria-label="알림" title="알림">
-            <Bell size={21} />
-            <span className="dot" />
+          <button
+            className={`rail-button ${mobileTab === 'news' ? 'is-active' : ''}`}
+            type="button"
+            onClick={() => handleMobileTabChange('news')}
+            aria-label="뉴스"
+            title="뉴스"
+          >
+            <Newspaper size={21} />
           </button>
-          {isAdmin && (
-            <button
-              className="rail-button"
-              type="button"
-              onClick={() => openAdminPanel('users')}
-              aria-label="친구 관리"
-              title="친구 관리"
-            >
-              <ShieldCheck size={21} />
-            </button>
-          )}
+          <button
+            className={`rail-button ${mobileTab === 'calls' ? 'is-active' : ''}`}
+            type="button"
+            onClick={() => handleMobileTabChange('calls')}
+            aria-label="통화"
+            title="통화"
+          >
+            <Phone size={21} />
+          </button>
           <button
             className="rail-button"
             type="button"
@@ -4046,235 +4349,21 @@ function App() {
         </button>
       </aside>
 
-      <section className="room-panel" aria-label="채팅방 목록">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">GreenTalk</p>
-            <h1>채팅</h1>
-            <p className="signed-user">
-              {authSession.nickname}
-              <span className={`role-pill is-${authSession.role}`}>
-                {roleCopy[authSession.role]}
-              </span>
-            </p>
-          </div>
-        </div>
-
-        <label className="search-box">
-          <Search size={18} />
-          <input
-            type="search"
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="이름, 메시지 검색"
-          />
-        </label>
-
-        <div className="room-list">
-          {filteredRooms.length > 0 ? (
-            filteredRooms.map((room) => {
-              const display = getRoomDisplay(room)
-
-              return (
-                <button
-                  className={`room-row ${room.id === activeRoomId ? 'is-active' : ''}`}
-                  key={room.id}
-                  type="button"
-                  onClick={() => handleSelectRoom(room.id)}
-                >
-                  {renderRoomAvatar(room)}
-                  <span className="room-copy">
-                    <span className="room-name">
-                      {display.name}
-                      <small>{room.members}</small>
-                    </span>
-                    <span className="room-subtitle">{display.subtitle}</span>
-                  </span>
-                  {room.unread > 0 && <span className="unread-count">{room.unread}</span>}
-                </button>
-              )
-            })
-          ) : (
-            <div className="room-empty">
-              <MessageCircle size={28} />
-              <p>표시할 채팅방이 없습니다.</p>
-            </div>
-          )}
-        </div>
+      <section className="room-panel" aria-label="탭 패널">
+        {renderDesktopTabStrip()}
+        {renderDesktopTabPanel()}
       </section>
 
       <section className="mobile-tab-page is-friends" aria-label="친구">
-        <div className="mobile-page-heading">
-          <div>
-            <p className="eyebrow">GreenTalk</p>
-            <h1>친구</h1>
-          </div>
-          <button className="icon-button" type="button" onClick={openSettings} aria-label="내 프로필">
-            <UserRound size={20} />
-          </button>
-        </div>
-        <div className="mobile-page-list">
-          <button className="mobile-page-row" type="button" onClick={openSettings}>
-            {renderUserAvatar(authSession.nickname, authSession.photoURL, 'avatar')}
-            <span className="mobile-page-copy">
-              <strong>{authSession.nickname}</strong>
-              <small>내 프로필</small>
-            </span>
-          </button>
-          {isAdmin && (
-            <div className="mobile-admin-console friends-admin-console">
-              {renderAdminConsole('mobile')}
-            </div>
-          )}
-          {mobileDirectRooms.length > 0 ? (
-            mobileDirectRooms.map((room) => {
-              const display = getRoomDisplay(room)
-
-              return (
-                <button
-                  className="mobile-page-row"
-                  key={room.id}
-                  type="button"
-                  onClick={() => handleSelectRoom(room.id)}
-                >
-                  {renderRoomAvatar(room)}
-                  <span className="mobile-page-copy">
-                    <strong>{display.name}</strong>
-                    <small>{room.status}</small>
-                  </span>
-                </button>
-              )
-            })
-          ) : (
-            <div className="mobile-page-empty">
-              <UserRound size={28} />
-              <p>표시할 친구가 없습니다.</p>
-            </div>
-          )}
-        </div>
+        {renderFriendsPanel()}
       </section>
 
       <section className="mobile-tab-page is-news" aria-label="뉴스">
-        <div className="mobile-page-heading">
-          <div>
-            <p className="eyebrow">GreenTalk</p>
-            <h1>뉴스</h1>
-          </div>
-        </div>
-        <div className="mobile-page-list news-feed-list">
-          <div className="news-category-tabs" role="tablist" aria-label="한국경제 RSS 테마">
-            {hankyungNewsCategories.map((category) => (
-              <button
-                className={category.id === activeNewsCategory.id ? 'is-active' : ''}
-                key={category.id}
-                type="button"
-                onClick={() => setActiveNewsCategoryId(category.id)}
-              >
-                {category.label}
-              </button>
-            ))}
-          </div>
-
-          <a
-            className="news-source-link"
-            href={activeNewsCategory.feedUrl}
-            target="_blank"
-            rel="noreferrer"
-          >
-            한국경제 {activeNewsCategory.label} RSS
-          </a>
-
-          {isNewsLoading ? (
-            <div className="mobile-page-empty">
-              <Newspaper size={28} />
-              <p>뉴스를 불러오는 중입니다.</p>
-            </div>
-          ) : newsError ? (
-            <div className="mobile-page-empty">
-              <Newspaper size={28} />
-              <p>{newsError}</p>
-            </div>
-          ) : (
-            newsItems.map((item) => (
-              <a
-                className="mobile-news-card news-feed-item"
-                href={item.link}
-                key={item.id}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <strong>{item.title}</strong>
-                {item.summary && <p>{item.summary}</p>}
-                <small>{item.publishedAt || '한국경제'}</small>
-              </a>
-            ))
-          )}
-        </div>
+        {renderNewsPanel()}
       </section>
 
       <section className="mobile-tab-page is-calls" aria-label="통화">
-        <div className="mobile-page-heading">
-          <div>
-            <p className="eyebrow">GreenTalk</p>
-            <h1>통화</h1>
-          </div>
-        </div>
-        <div className="mobile-page-list">
-          {chatRooms.length > 0 ? (
-            chatRooms.map((room) => {
-              const display = getRoomDisplay(room)
-
-              return (
-                <div className="mobile-call-row" key={room.id}>
-                  <button
-                    className="mobile-call-main"
-                    type="button"
-                    onClick={() => handleSelectRoom(room.id)}
-                  >
-                    {renderRoomAvatar(room)}
-                    <span className="mobile-page-copy">
-                      <strong>{display.name}</strong>
-                      <small>{room.status}</small>
-                    </span>
-                  </button>
-                  <div className="mobile-call-actions">
-                    <button
-                      type="button"
-                      onClick={() => openCall('voice', room.id)}
-                      aria-label={`${display.name} 음성 채팅`}
-                      title={
-                        isAdmin && room.type === 'direct'
-                          ? '음성 채팅'
-                          : '관리자만 1:1 통화를 걸 수 있음'
-                      }
-                      disabled={!isAdmin || room.type !== 'direct'}
-                    >
-                      <Phone size={18} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openCall('video', room.id)}
-                      aria-label={`${display.name} 영상통화`}
-                      title={
-                        isAdmin && room.type === 'direct'
-                          ? '영상통화'
-                          : '관리자만 1:1 통화를 걸 수 있음'
-                      }
-                      disabled={!isAdmin || room.type !== 'direct'}
-                    >
-                      <Video size={18} />
-                    </button>
-                  </div>
-                </div>
-              )
-            })
-          ) : (
-            <div className="mobile-page-empty">
-              <Phone size={28} />
-              <p>표시할 통화가 없습니다.</p>
-            </div>
-          )}
-        </div>
+        {renderCallsPanel()}
       </section>
 
       <section

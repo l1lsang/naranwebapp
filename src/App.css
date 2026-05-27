@@ -356,6 +356,34 @@ button:disabled {
   padding: 26px 18px;
 }
 
+.desktop-tab-strip {
+  min-height: 42px;
+  border-radius: 8px;
+  background: #f3f6f5;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+}
+
+.desktop-tab-strip button {
+  min-width: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.desktop-tab-strip button.is-active {
+  color: #ffffff;
+  background: #12342d;
+}
+
 .panel-heading,
 .chat-header,
 .detail-header {
@@ -655,6 +683,23 @@ h3 {
   display: grid;
   gap: 8px;
   overflow-y: auto;
+}
+
+.room-panel .mobile-page-list {
+  min-height: 0;
+  flex: 1;
+}
+
+.friends-admin-console {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  display: block;
+  padding: 12px;
+}
+
+.friends-admin-console .admin-console {
+  padding-top: 0;
 }
 
 .mobile-page-row {
@@ -2188,6 +2233,10 @@ h3 {
   .conversation-panel,
   .mobile-tab-page {
     min-height: calc(100svh - 72px - env(safe-area-inset-bottom));
+  }
+
+  .desktop-tab-strip {
+    display: none;
   }
 
   .room-panel,
