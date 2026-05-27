@@ -84,7 +84,7 @@ type AuthMode = 'login' | 'signup' | 'reset'
 type ConnectionState = 'connecting' | 'live' | 'error'
 type UserRole = 'user' | 'admin'
 type UserStatus = 'active' | 'blocked'
-type AdminPanel = 'users' | 'direct' | 'group' | 'appearance' | 'retention'
+type AdminPanel = 'users' | 'direct' | 'group'
 type RoomType = 'group' | 'direct'
 type AttachmentKind = 'image' | 'file'
 type MobileTab = 'friends' | 'chats' | 'news' | 'calls'
@@ -126,6 +126,14 @@ type RoomParticipant = {
   status?: UserStatus
   photoURL: string
   isCurrentUser: boolean
+}
+
+type NewsItem = {
+  id: string
+  title: string
+  link: string
+  summary: string
+  publishedAt: string
 }
 
 type ChatRoom = {
@@ -236,6 +244,7 @@ const timeFormatter = new Intl.DateTimeFormat('ko-KR', {
 
 const roomAccents = ['#06c755', '#4f7cff', '#ffb224', '#f25f5c', '#6f7bd9']
 const roomColorSwatches = ['#06c755', '#4f7cff', '#ffb224', '#f25f5c', '#6f7bd9', '#18a999']
+const hankyungRssUrl = 'https://www.hankyung.com/feed/all-news'
 
 const roleCopy: Record<UserRole, string> = {
   user: '일반인',
@@ -294,6 +303,54 @@ const formatFileSize = (bytes: number) => {
   }
 
   return `${bytes}B`
+}
+
+const stripHtml = (value: string) =>
+  new DOMParser().parseFromString(value, 'text/html').body.textContent?.trim() ?? ''
+
+const formatNewsDate = (value: string) => {
+  if (!value) {
+    return ''
+  }
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
+
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+const parseRssItems = (rssText: string): NewsItem[] => {
+  const rssDocument = new DOMParser().parseFromString(rssText, 'application/xml')
+
+  if (rssDocument.querySelector('parsererror')) {
+    throw new Error('Invalid RSS')
+  }
+
+  return Array.from(rssDocument.querySelectorAll('item'))
+    .slice(0, 12)
+    .map((item, index) => {
+      const title = item.querySelector('title')?.textContent?.trim() ?? '제목 없음'
+      const link = item.querySelector('link')?.textContent?.trim() ?? hankyungRssUrl
+      const description = stripHtml(item.querySelector('description')?.textContent ?? '')
+      const pubDate = item.querySelector('pubDate')?.textContent?.trim() ?? ''
+      const guid = item.querySelector('guid')?.textContent?.trim()
+
+      return {
+        id: guid || link || `${title}-${index}`,
+        title,
+        link,
+        summary: description.length > 110 ? `${description.slice(0, 110)}...` : description,
+        publishedAt: formatNewsDate(pubDate),
+      }
+    })
 }
 
 const sanitizeStorageName = (fileName: string) =>
@@ -583,6 +640,9 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('')
   const [remoteMessages, setRemoteMessages] = useState<ChatMessage[]>([])
   const [readReceipts, setReadReceipts] = useState<ReadReceipt[]>([])
+  const [newsItems, setNewsItems] = useState<NewsItem[]>([])
+  const [isNewsLoading, setIsNewsLoading] = useState(true)
+  const [newsError, setNewsError] = useState('')
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting')
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -621,7 +681,7 @@ function App() {
   const [directTargetId, setDirectTargetId] = useState('')
   const [groupName, setGroupName] = useState('')
   const [selectedGroupMemberIds, setSelectedGroupMemberIds] = useState<string[]>([])
-  const [retentionRoomId, setRetentionRoomId] = useState('')
+  const [, setRetentionRoomId] = useState('')
   const [appearanceRoomId, setAppearanceRoomId] = useState('')
   const [isRoomImageUploading, setIsRoomImageUploading] = useState(false)
   const [roomImageProgress, setRoomImageProgress] = useState(0)
@@ -670,11 +730,6 @@ function App() {
   const groupRooms = useMemo(
     () => chatRooms.filter((room) => room.type === 'group'),
     [chatRooms],
-  )
-
-  const retentionTargetRoom = useMemo(
-    () => chatRooms.find((room) => room.id === retentionRoomId) ?? chatRooms[0],
-    [chatRooms, retentionRoomId],
   )
 
   const appearanceTargetRoom = useMemo(
@@ -852,6 +907,58 @@ function App() {
 
     return nextBadges
   }, [authSession, readReceipts, visibleMessages])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadHankyungNews = async () => {
+      setIsNewsLoading(true)
+      setNewsError('')
+
+      const rssSources = [
+        hankyungRssUrl,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(hankyungRssUrl)}`,
+      ]
+
+      for (const rssSource of rssSources) {
+        try {
+          const response = await fetch(rssSource)
+
+          if (!response.ok) {
+            throw new Error('RSS request failed')
+          }
+
+          const rssText = await response.text()
+          const items = parseRssItems(rssText)
+
+          if (items.length === 0) {
+            throw new Error('Empty RSS')
+          }
+
+          if (!cancelled) {
+            setNewsItems(items)
+            setIsNewsLoading(false)
+          }
+
+          return
+        } catch {
+          // Direct RSS requests can be blocked by CORS, so try the proxy source next.
+        }
+      }
+
+      if (!cancelled) {
+        setNewsItems([])
+        setNewsError('한국경제 RSS를 불러오지 못했습니다.')
+        setIsNewsLoading(false)
+      }
+    }
+
+    void loadHankyungNews()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (!authSession) {
@@ -3317,9 +3424,6 @@ function App() {
   }
 
   const renderAdminConsole = (variant: 'desktop' | 'mobile') => {
-    const selectedRetentionRoomId = retentionTargetRoom?.id ?? ''
-    const selectedAppearanceRoomId = appearanceTargetRoom?.id ?? ''
-
     return (
       <div className={`admin-console is-${variant}`}>
         <div className="admin-tabs" role="tablist" aria-label="관리 메뉴">
@@ -3343,20 +3447,6 @@ function App() {
             onClick={() => openAdminPanel('group')}
           >
             단톡
-          </button>
-          <button
-            className={adminPanel === 'appearance' ? 'is-active' : ''}
-            type="button"
-            onClick={() => openAdminPanel('appearance')}
-          >
-            꾸미기
-          </button>
-          <button
-            className={adminPanel === 'retention' ? 'is-active' : ''}
-            type="button"
-            onClick={() => openAdminPanel('retention')}
-          >
-            삭제
           </button>
         </div>
 
@@ -3440,114 +3530,10 @@ function App() {
               ))}
             </div>
             <button className="primary-button" type="submit">
-              단톡 만들기
-            </button>
-          </form>
-        )}
-
-        {adminPanel === 'retention' && (
-          <div className="admin-form retention-form">
-            <label className="field">
-              <span>설정할 채팅방</span>
-              <select
-                value={selectedRetentionRoomId}
-                onChange={(event) => setRetentionRoomId(event.target.value)}
-                disabled={chatRooms.length === 0}
-              >
-                {chatRooms.map((room) => (
-                  <option key={room.id} value={room.id}>
-                    {getRoomDisplay(room).name} · {retentionCopy[room.retentionPolicy]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="retention-options" role="radiogroup" aria-label="삭제 정책">
-              {(['oneDay', 'oneMonth'] as RetentionPolicy[]).map((policy) => (
-                <button
-                  className={retentionTargetRoom?.retentionPolicy === policy ? 'is-active' : ''}
-                  key={policy}
-                  type="button"
-                  onClick={() => void handleUpdateRoomRetention(selectedRetentionRoomId, policy)}
-                  disabled={!selectedRetentionRoomId}
-                  aria-pressed={retentionTargetRoom?.retentionPolicy === policy}
-                >
-                  <strong>{retentionCopy[policy]}</strong>
-                  <small>{retentionDescription[policy]}</small>
-                </button>
-              ))}
-            </div>
-            <p className="retention-note">
-              기본값은 1일 후 삭제입니다. 변경한 정책은 새로 저장되는 메시지부터 적용됩니다.
-            </p>
-          </div>
-        )}
-
-        {adminPanel === 'appearance' && (
-          <div className="admin-form room-appearance-form">
-            <label className="field">
-              <span>꾸밀 단톡방</span>
-              <select
-                value={selectedAppearanceRoomId}
-                onChange={(event) => setAppearanceRoomId(event.target.value)}
-                disabled={groupRooms.length === 0}
-              >
-                {groupRooms.map((room) => (
-                  <option key={room.id} value={room.id}>
-                    {room.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {appearanceTargetRoom ? (
-              <>
-                <div className="room-appearance-card">
-                  {renderRoomAvatar(appearanceTargetRoom, 'profile-avatar room-avatar-preview')}
-                  <div>
-                    <strong>{appearanceTargetRoom.name}</strong>
-                    <span>{appearanceTargetRoom.avatarURL ? '이미지 사용 중' : '색상 사용 중'}</span>
-                  </div>
-                </div>
-
-                <div className="appearance-actions">
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={() => roomImageInputRef.current?.click()}
-                    disabled={isRoomImageUploading}
-                  >
-                    {isRoomImageUploading ? `업로드 중 ${roomImageProgress}%` : '이미지 변경'}
-                  </button>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={() => void handleClearRoomImage(appearanceTargetRoom.id)}
-                    disabled={!appearanceTargetRoom.avatarURL || isRoomImageUploading}
-                  >
-                    이미지 제거
-                  </button>
-                </div>
-
-                <div className="color-swatches" aria-label="단톡방 색상">
-                  {roomColorSwatches.map((color) => (
-                    <button
-                      className={appearanceTargetRoom.accent === color ? 'is-active' : ''}
-                      key={color}
-                      type="button"
-                      onClick={() => void handleUpdateRoomAccent(appearanceTargetRoom.id, color)}
-                      aria-label={`${color} 색상`}
-                      title={color}
-                    >
-                      <span style={{ backgroundColor: color }} />
-                    </button>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p className="retention-note">꾸밀 단톡방이 없습니다.</p>
-            )}
-          </div>
-        )}
+            단톡 만들기
+          </button>
+        </form>
+      )}
       </div>
     )
   }
@@ -4052,15 +4038,36 @@ function App() {
             <h1>뉴스</h1>
           </div>
         </div>
-        <div className="mobile-page-list">
-          <article className="mobile-news-card">
-            <strong>오늘의 소식</strong>
-            <p>새 알림이 없습니다.</p>
-          </article>
-          <article className="mobile-news-card">
-            <strong>파일 공유</strong>
-            <p>새 파일 소식이 없습니다.</p>
-          </article>
+        <div className="mobile-page-list news-feed-list">
+          <a className="news-source-link" href={hankyungRssUrl} target="_blank" rel="noreferrer">
+            한국경제 RSS
+          </a>
+
+          {isNewsLoading ? (
+            <div className="mobile-page-empty">
+              <Newspaper size={28} />
+              <p>뉴스를 불러오는 중입니다.</p>
+            </div>
+          ) : newsError ? (
+            <div className="mobile-page-empty">
+              <Newspaper size={28} />
+              <p>{newsError}</p>
+            </div>
+          ) : (
+            newsItems.map((item) => (
+              <a
+                className="mobile-news-card news-feed-item"
+                href={item.link}
+                key={item.id}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <strong>{item.title}</strong>
+                {item.summary && <p>{item.summary}</p>}
+                <small>{item.publishedAt || '한국경제'}</small>
+              </a>
+            ))
+          )}
         </div>
       </section>
 
