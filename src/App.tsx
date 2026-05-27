@@ -353,6 +353,88 @@ const parseRssItems = (rssText: string): NewsItem[] => {
     })
 }
 
+const getTextValue = (data: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const value = data[key]
+
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim()
+    }
+  }
+
+  return ''
+}
+
+const normalizeJsonNewsItem = (item: unknown, index: number): NewsItem | null => {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    return null
+  }
+
+  const data = item as Record<string, unknown>
+  const title = getTextValue(data, ['title'])
+  const link = getTextValue(data, ['link', 'url'])
+
+  if (!title || !link) {
+    return null
+  }
+
+  const description = stripHtml(getTextValue(data, ['description', 'content', 'summary']))
+  const publishedAt = getTextValue(data, ['pubDate', 'publishedAt', 'published', 'date'])
+  const id = getTextValue(data, ['id', 'guid']) || link || `${title}-${index}`
+
+  return {
+    id,
+    title,
+    link,
+    summary: description.length > 110 ? `${description.slice(0, 110)}...` : description,
+    publishedAt: formatNewsDate(publishedAt),
+  }
+}
+
+const parseJsonNewsItems = (payload: unknown): NewsItem[] => {
+  if (Array.isArray(payload)) {
+    return payload
+      .map((item, index) => normalizeJsonNewsItem(item, index))
+      .filter((item): item is NewsItem => Boolean(item))
+      .slice(0, 12)
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return []
+  }
+
+  const data = payload as Record<string, unknown>
+
+  if (typeof data.contents === 'string') {
+    return parseRssItems(data.contents)
+  }
+
+  if (Array.isArray(data.items)) {
+    return parseJsonNewsItems(data.items)
+  }
+
+  return []
+}
+
+const parseNewsResponse = async (response: Response) => {
+  const text = await response.text()
+  const trimmedText = text.trim()
+
+  if (!trimmedText) {
+    return []
+  }
+
+  if (trimmedText.startsWith('<')) {
+    return parseRssItems(trimmedText)
+  }
+
+  if (trimmedText.startsWith('{') || trimmedText.startsWith('[')) {
+    return parseJsonNewsItems(JSON.parse(trimmedText))
+  }
+
+  return []
+}
+
 const sanitizeStorageName = (fileName: string) =>
   fileName
     .trim()
@@ -916,8 +998,11 @@ function App() {
       setNewsError('')
 
       const rssSources = [
-        hankyungRssUrl,
+        '/api/hankyung-rss',
         `https://api.allorigins.win/raw?url=${encodeURIComponent(hankyungRssUrl)}`,
+        `https://api.allorigins.win/get?url=${encodeURIComponent(hankyungRssUrl)}`,
+        `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(hankyungRssUrl)}`,
+        hankyungRssUrl,
       ]
 
       for (const rssSource of rssSources) {
@@ -928,8 +1013,7 @@ function App() {
             throw new Error('RSS request failed')
           }
 
-          const rssText = await response.text()
-          const items = parseRssItems(rssText)
+          const items = await parseNewsResponse(response)
 
           if (items.length === 0) {
             throw new Error('Empty RSS')
@@ -942,7 +1026,7 @@ function App() {
 
           return
         } catch {
-          // Direct RSS requests can be blocked by CORS, so try the proxy source next.
+          // Some sources can be blocked by CORS or rate limits, so try the next source.
         }
       }
 

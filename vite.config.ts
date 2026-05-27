@@ -8,4 +8,13 @@ const root = fileURLToPath(new URL('.', import.meta.url))
 export default defineConfig({
   root,
   plugins: [react()],
+  server: {
+    proxy: {
+      '/api/hankyung-rss': {
+        target: 'https://www.hankyung.com',
+        changeOrigin: true,
+        rewrite: () => '/feed/all-news',
+      },
+    },
+  },
 })
