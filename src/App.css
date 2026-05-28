@@ -1103,10 +1103,70 @@ h3 {
 }
 
 .read-receipt {
+  border: 0;
+  background: transparent;
   color: #0d8f44;
+  cursor: pointer;
   font-size: 11px;
   font-weight: 900;
+  line-height: 1.25;
+  max-width: 180px;
+  overflow-wrap: anywhere;
+  padding: 0;
+  text-align: right;
+  white-space: normal;
+}
+
+.read-receipt:hover {
+  text-decoration: underline;
+}
+
+.read-readers-dialog {
+  max-width: 360px;
+}
+
+.read-reader-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(420px, 58vh);
+  overflow: auto;
+}
+
+.read-reader-row {
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+}
+
+.read-reader-row:hover {
+  background: rgba(18, 52, 45, 0.06);
+}
+
+.read-reader-row span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.read-reader-row strong,
+.read-reader-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.read-reader-row strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.read-reader-row small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
 }
 
 .empty-state {

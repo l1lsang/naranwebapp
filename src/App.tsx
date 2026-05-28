@@ -183,6 +183,13 @@ type ReadReceipt = {
   lastReadMessageId: string
 }
 
+type MessageReader = {
+  id: string
+  nickname: string
+  photoURL: string
+  meta: string
+}
+
 type StoredMessage = {
   roomId?: string
   authorId?: string
@@ -777,6 +784,7 @@ function App() {
   const [roomAddMemberIds, setRoomAddMemberIds] = useState<string[]>([])
   const [callMode, setCallMode] = useState<CallMode | null>(null)
   const [callRoomId, setCallRoomId] = useState('')
+  const [selectedReadMessageId, setSelectedReadMessageId] = useState('')
   const [activeCallId, setActiveCallId] = useState('')
   const [callPeerId, setCallPeerId] = useState('')
   const [callPhase, setCallPhase] = useState<CallPhase>('ended')
@@ -995,36 +1003,69 @@ function App() {
     [activeNewsCategoryId],
   )
 
-  const readBadgeByMessageId = useMemo(() => {
-    const nextBadges: Record<string, number> = {}
+  const readersByMessageId = useMemo(() => {
+    const nextReaders: Record<string, MessageReader[]> = {}
 
     if (!authSession || visibleMessages.length === 0) {
-      return nextBadges
+      return nextReaders
     }
+
+    const messageIndexById = visibleMessages.reduce<Record<string, number>>((nextIndex, message, index) => {
+      nextIndex[message.id] = index
+      return nextIndex
+    }, {})
 
     readReceipts
       .filter((receipt) => receipt.userId !== authSession.uid)
       .forEach((receipt) => {
-        const readIndex = visibleMessages.findIndex(
-          (message) => message.id === receipt.lastReadMessageId,
-        )
+        const readIndex = messageIndexById[receipt.lastReadMessageId]
 
-        if (readIndex < 0) {
+        if (typeof readIndex !== 'number') {
           return
         }
 
-        for (let index = readIndex; index >= 0; index -= 1) {
+        const participant = activeRoomParticipants.find(
+          (roomParticipant) => roomParticipant.id === receipt.userId,
+        )
+        const profile =
+          participant ??
+          userProfileById[receipt.userId] ??
+          activeRoom?.participantProfiles[receipt.userId]
+        const reader: MessageReader = {
+          id: receipt.userId,
+          nickname:
+            (participant && participant.nickname) ||
+            profile?.nickname ||
+            (receipt.userId === authSession.uid ? '나' : '참여자'),
+          photoURL: (participant && participant.photoURL) || profile?.photoURL || '',
+          meta:
+            participant?.email ||
+            (participant?.role ? roleCopy[participant.role] : '') ||
+            '읽음',
+        }
+
+        for (let index = 0; index <= readIndex; index += 1) {
           const message = visibleMessages[index]
 
           if (message.authorId === authSession.uid) {
-            nextBadges[message.id] = (nextBadges[message.id] ?? 0) + 1
-            return
+            nextReaders[message.id] = [...(nextReaders[message.id] ?? []), reader]
           }
         }
       })
 
-    return nextBadges
-  }, [authSession, readReceipts, visibleMessages])
+    return nextReaders
+  }, [
+    activeRoom?.participantProfiles,
+    activeRoomParticipants,
+    authSession,
+    readReceipts,
+    userProfileById,
+    visibleMessages,
+  ])
+
+  const selectedReadMessageReaders = selectedReadMessageId
+    ? readersByMessageId[selectedReadMessageId] ?? []
+    : []
 
   useEffect(() => {
     let cancelled = false
@@ -2087,6 +2128,7 @@ function App() {
     setActiveRoomId(roomId)
     setRetentionRoomId(roomId)
     setSelectedRoomProfileId('')
+    setSelectedReadMessageId('')
     setRoomAddMemberIds([])
     if (selectedRoom?.type === 'group') {
       setAppearanceRoomId(roomId)
@@ -2102,6 +2144,7 @@ function App() {
     setMobileTab(nextTab)
     setIsMobileChatOpen(false)
     setActiveRoomId('')
+    setSelectedReadMessageId('')
     setRemoteMessages([])
     setReadReceipts([])
     setDraft('')
@@ -2111,6 +2154,7 @@ function App() {
     setMobileTab('chats')
     setIsMobileChatOpen(false)
     setActiveRoomId('')
+    setSelectedReadMessageId('')
     setRemoteMessages([])
     setReadReceipts([])
     setDraft('')
@@ -2125,6 +2169,7 @@ function App() {
 
     setActiveRoomId(targetRoom.id)
     setRetentionRoomId(targetRoom.id)
+    setSelectedReadMessageId('')
     setSelectedRoomProfileId(profileId || getRoomParticipantIds(targetRoom)[0] || '')
     setRoomAddMemberIds([])
     if (targetRoom.type === 'group') {
@@ -3400,6 +3445,68 @@ function App() {
     )
   }
 
+  const renderReadReceipt = (messageId: string, readers: MessageReader[]) => {
+    if (readers.length === 0) {
+      return null
+    }
+
+    const visibleNames = readers.slice(0, 2).map((reader) => reader.nickname)
+    const label =
+      readers.length > visibleNames.length
+        ? `읽음 ${visibleNames.join(', ')} 외 ${readers.length - visibleNames.length}명`
+        : `읽음 ${visibleNames.join(', ')}`
+
+    return (
+      <button
+        className="read-receipt"
+        type="button"
+        onClick={() => setSelectedReadMessageId(messageId)}
+        title="읽은 사람 보기"
+      >
+        {label}
+      </button>
+    )
+  }
+
+  const renderReadReadersDialog = () => {
+    if (!selectedReadMessageId || selectedReadMessageReaders.length === 0) {
+      return null
+    }
+
+    return (
+      <div className="settings-backdrop" role="presentation">
+        <section className="settings-dialog read-readers-dialog" aria-label="읽은 사람 목록">
+          <div className="settings-header">
+            <div>
+              <span>읽은 사람</span>
+              <h2>{selectedReadMessageReaders.length}명</h2>
+            </div>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => setSelectedReadMessageId('')}
+              aria-label="읽은 사람 목록 닫기"
+              title="닫기"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div className="read-reader-list">
+            {selectedReadMessageReaders.map((reader) => (
+              <div className="read-reader-row" key={reader.id}>
+                {renderUserAvatar(reader.nickname, reader.photoURL)}
+                <span>
+                  <strong>{reader.nickname}</strong>
+                  <small>{reader.meta}</small>
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+    )
+  }
+
   const renderUserAvatar = (nickname: string, photoURL = '', className = 'avatar small') => {
     const displayName = nickname || '친구'
 
@@ -4453,7 +4560,7 @@ function App() {
             </div>
           ) : visibleMessages.length > 0 ? (
             visibleMessages.map((message) => {
-              const readCount = readBadgeByMessageId[message.id] ?? 0
+              const messageReaders = readersByMessageId[message.id] ?? []
               const authorProfile =
                 userProfileById[message.authorId] ??
                 activeRoom?.participantProfiles[message.authorId]
@@ -4470,11 +4577,7 @@ function App() {
                     <div className="bubble-line">
                       {message.isMine && (
                         <span className="message-meta">
-                          {readCount > 0 && (
-                            <span className="read-receipt">
-                              {readCount > 1 ? `읽음 ${readCount}` : '읽음'}
-                            </span>
-                          )}
+                          {renderReadReceipt(message.id, messageReaders)}
                           <span className="message-time">{message.time}</span>
                         </span>
                       )}
@@ -4723,6 +4826,7 @@ function App() {
       />
 
       {renderRoomSettingsDialog()}
+      {renderReadReadersDialog()}
       {renderIncomingCallDialog()}
       {renderCallDialog()}
       {renderPrivacyShield()}
